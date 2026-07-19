@@ -1,530 +1,249 @@
-TypingMania NEO
-===============
+# TypingManiaNovel
 
-TypingMania is a song lyric typing game. You can also think of it like
-Karaoke, but typing version.
+**简体中文** | [English](README.en.md) | [日本語](README.ja.md)
 
-**You can play at https://typingmania.stdlib.xyz**
+**当前版本：20260719**
 
-You can also contact me at typingmania (at) stdlib (dot) xyz.
+TypingManiaNovel 是一款基于
+[TypingMania NEO](https://github.com/innocenat/typingmania)
+二次开发的多语言歌词打字音游。它支持中、英、日三语歌曲，可在本机或静态网站运行，并提供按键雨、自动演示、曲库管理和 Windows 版 QQ 音乐导入功能。
 
-### Highlighted features
+> **可以直接从 QQ 音乐导入歌曲：** 保持 QQ 音乐已启动并登录，游戏会自动解密缓存音频、核对歌词与发音、匹配封面，并把歌曲转换成可玩的曲目。
 
-- YouTube playback ability
-- Japanese lyric lines are more natural (Kanji & Furigana)
-- Typing sound feedback
-- Can load local song files
+下载
+[`TypingManiaNovel-20260719-Windows-x64.zip`](https://github.com/kyupi-git/typingmania/releases/download/v20260719/TypingManiaNovel-20260719-Windows-x64.zip)，
+解压后双击
+`start-game.cmd` 即可游玩。压缩包已包含运行环境和三首示例歌曲，无需安装
+Node.js 或 npm。
 
-### Roadmap
+公开项目只包含原创的中文、英语、日语示例歌曲各一首，不包含 QQ 音乐缓存、导入的媒体、账号会话、收听记录或个人曲库数据。
 
-- Visual editor for song
+## 快速开始
 
-Table of Content
-----------------
+### Windows 11 x64
 
-- [How to Play](#how-to-play)
-- [Creating New Song](#creating-new-song)
-- [Score Calculation](#score-calculation)
-- [Supported Browser](#supported-browsers)
-- [History](#history)
-- [Project Structure](#project-structure)
-- [Installation & Building](#installation--building)
-- [File Format](#file-format)
-- [License & Copyright](#license--copyright)
-- [日本語](#日本語)
+1. 下载并解压 Release 压缩包，或克隆完整项目。
+2. 双击 `start-game.cmd`。
+3. 在 Edge 或其它现代浏览器中开始游玩。
 
-How to Play
------------
+启动器首次运行时会校验并解压内置 Node.js 运行环境，启动此项目专用的一个本地服务，等待曲库扫描完成后打开游戏。再次启动会复用已有服务。
 
-This game is controlled purely by a keyboard (because it is a typing game).
-There is no mouse interaction available.
+双击 `terminate.cmd` 可立即停止此项目的后台服务。终止程序会核对当前目录和随机会话令牌，不会结束其它软件使用的 `node.exe` 进程。
 
-### Selecting song
+不要直接双击 `index.html`。浏览器对本地文件的安全限制会拦截游戏所需功能，请使用启动器、Web 服务器或静态部署地址。
 
-![TypingMania NEO Menu](docs/img/game-menu.png)
+### 开发环境与其它平台
 
-**Top-Left** is the master volume control. Use the `PageUp` and `PageDown` keys
-to change the volume level. Note that for YouTube, the volume is only 
-approximated.
+未使用内置 Windows x64 运行环境时，需要 Node.js 20 或更新版本：
 
-**Right** part of the screen is the song list. It shows the artist and song 
-title. The square shows the song language, while the color denotes the media
-type:
+```sh
+npm ci
+npm run start-local -- --open
+```
 
-- **Red** (shown in the picture) means YouTube media.
-- **Green** means a video file.
-- **Blue** means audio-only.
+## 与 TypingMania NEO fork 的差异
 
-**Left** part shows song detail. It includes artist, song title, song subtitle,
-current high score, the song length. It also shows the character-per-minute
-of the song, at 90 percentile and the maximum. This can be used to gauge
-the difficulty of the song.
+下表以 [`kyupi-git/typingmania` fork 的 `82c75d7`](https://github.com/kyupi-git/typingmania/tree/82c75d77396025e1a73c1e710c32e8716f83c734)
+作为 TypingMania NEO 的比较基线。
 
-To navigate the menu, use `Up Arrow` and `Down Arrow`. To enter a collection or
-select a song to play, use `Enter`. To exit collection, use `Backspace`.
+| 项目 | TypingMania NEO fork 基线 | TypingManiaNovel |
+| --- | --- | --- |
+| 产品标识 | TypingMania NEO 1.1.1 | TypingManiaNovel |
+| 启动方式 | 手动启动 Web 服务或部署到网站 | 自带运行环境，一键启动并复用单个本地服务，可安全结束服务；仍支持静态部署 |
+| 界面 | 以英语和键盘操作为主 | 自动识别浏览器语言，提供中英日界面、语言选择、鼠标点击和滚轮操作 |
+| 曲库 | 静态索引、URL 和拖入 `.typingmania` 文件 | 启动时扫描、去重、分级曲库、海报预览，以及按添加时间、所需按键数、标题、歌手进行正序或倒序排列 |
+| 导入 | 由用户自行制作歌曲包 | 每次从 QQ 音乐缓存继续导入 20 首不同的可用歌曲，检测登录会话、解密、校验并去重 |
+| 歌词 | 主要依赖手工整理，包括日语汉字读音 | 针对中英日分别过滤非歌词；QQ 导入自动生成中文拼音，并使用歌曲专属的日语 Roma QRC |
+| 输入规则 | 部分空格和转换后的标点可能需要输入 | 歌词仍显示空格和标点，游玩时只需输入字母 |
+| 日语输入 | 假名/罗马字表和多种可接受拼法 | 保留原有多拼法模型，并规范化导入歌曲的专属读音，不需要输入分隔符 |
+| 封面与出处 | 每个歌曲包一张图片 | 可验证时使用歌曲直接出处作品的海报作背景，并单独显示专辑封面；出处存疑时不误标 |
+| 速度指标 | 第 90 百分位与最大 CPM | 显示整首平均和最快 5 秒所需按键数，与完美演示及结算页面使用同一统计口径 |
+| 自动游玩 | 隐藏 Auto 模式，仍可能受玩家输入影响 | 明确的自动演示模式，以接近人类的节奏完成完美演示，成绩不写入玩家记录 |
+| 按键反馈 | 基本音效和游戏模式 | 提前落下的按键雨、正确/错误/漏按状态、连击光效与里程碑音效，并可关闭 |
+| 结算页面 | 分数、评级、连击、准确率和歌词行统计 | 完整成绩卡、键入流畅度和滚动速度图表、参考速度，以及最后一句后的自然过渡 |
+| 曲库维护 | 无多选编辑和干净重置 | 多选删除及安全回滚；一键还原为经过校验的三首示例歌曲 |
+| 网络策略 | 支持兼容歌曲的 YouTube 播放 | 正常游玩优先本地；QQ 音乐和 Bangumi 增强信息有地区备用线路、短超时与熔断；仅 YouTube 歌曲使用 YouTube |
+| 歌曲编辑器 | 标注为开发中的可视化编辑器 | Preact/HTM 本地化 Song Studio，不依赖公共 CDN |
+| 自动验证 | 原始 Jest 与构建脚本 | 单元测试、曲库质量、运行环境完整性、公开文件审计、静态构建和浏览器冒烟测试 |
 
-#### Using local file
+游戏尽量兼容原始 `.typingmania` 歌曲包，包括本地音视频和基于 YouTube 的歌曲。
 
-You can drag and drop a valid `.typingmania` file to the game to load. In this
-case, the high score is keyed by the file name.
+## 主要功能
 
-#### Automatic song selection
+- 中、英、日三语界面，首次打开时自动匹配浏览器语言。
+- 英语字母、无声调汉语拼音和支持多种拼法的日语罗马字输入。
+- 只输入字母；空格和标点保留在歌词中，但不参与判定。
+- 可关闭的预测式按键雨与低负载连击反馈。
+- 以接近真人节奏进行完美游玩的自动演示。
+- 曲目选择、演示与结算页面使用一致的每分钟按键数口径。
+- 成绩卡、键入流畅度分析和随时间变化的速度图。
+- 键盘、鼠标和滚轮操作。
+- 支持二级曲库排序、多选删除和一键重置。
+- 三首校验和固定的示例歌曲。
+- 支持本地音视频及兼容的 YouTube `.typingmania` 歌曲包。
 
-If you want the game to load and go straight to a specific song skipping the 
-menu, please pass the query string `song={file_url}` to the game, where 
-`file_url` is the relative path to the `.typingmania` file to load. The game 
-will immediately load the song provided.
+## 操作方式
 
-### Typing
+| 场景 | 操作 |
+| --- | --- |
+| 菜单 | 方向键或鼠标滚轮移动 |
+| 菜单 | `空格`、`Enter` 或鼠标点击确认 |
+| 菜单 | `Esc` 或 `Backspace` 返回 |
+| 游玩 | 输入字母 |
+| 游玩 | `Tab` 跳过当前一句 |
+| 游玩 | `Esc` 或 `Backspace` 退出歌曲 |
+| 任意页面 | `Page Up` / `Page Down` 调整音量 |
 
-![TypingMania NEO Typing](docs/img/game-play.png)
+主界面还可切换语言、排序、按键雨、自动演示，并可添加、删除或重置歌曲。
 
-Basically, just type what is on the screen. You can press `Esc` at any time to
-finish the song early.
+## 示例曲库
 
-You can use the `Tab` button to skip any line. Note that if you skipped a lyric
-that you have not finished typing yet, it will be counted as *skipped*.
+项目固定提供三首原创示例歌曲，用于验证全部歌词处理路径，并通过固定添加时间按以下顺序显示：
 
-The **Total** progress bar shows the progress within the song. The **Line**
-progress bar shows the current progress within the line.
+1. 中文：`指尖星光`
+2. 英语：`Letters in the Light`
+3. 日语：`明日へのリズム`
 
-For the Japanese line, even though the shown Romaji might be different, the 
-system supports almost every possible keypress sequence that will result in 
-that Kana. For example, にゃ can be input as *nya*, *nixya*, and *nilya*. 
-いっしょ can be input as *issho*, *ixtsusho*, *ixtushixyo*, etc.
+三首歌曲的音频、歌词和 SVG 图片均为项目原创资源，不访问网络，也不含音乐服务数据。每次启动时，本地服务会扫描项目中的 `.typingmania` 文件，跳过隐私缓存和工具目录，去重后重建 `data/songs.json`。
 
-### Score
+## 从 QQ 音乐添加歌曲
 
-![TypingMania NEO Score Screen](docs/img/game-score.png)
+在主界面打开“添加歌曲”，选择“QQ 音乐”。“其它方式”是保留的扩展入口，目前尚未开发。
 
-After the song ended (or `Esc` was pressed), the score summary screen will be
-shown with the following number:
-- **Score/Class**: Refer to [Score calculation](#score-calculation) section.
-- **Max Combo**: maximum number of consecutive correct keypresses.
-- **Correct**: number of correct keypresses.
-- **Missed**: number of incorrect keypresses.
-- **Completed Line**: number of lines completed.
-- **Skipped Line** number of lines that were not completed (unable to finish
-  typing within the time)
-- **Skipped Char**: number of characters unable to finish within the time.
-- **Accuracy**: your accuracy.
-- **Typing Accuracy**: typing accuracy if the skipped char is counted as 
-  missed.
-  
-### Game modes
-
-Game mode is a hidden feature. You can cycle game mode in the menu screen using
-`F9` key. It will cycle between these modes:
-
-- **Normal** Normal game mode. Default. No indications.
-- **Easy** In easy mode, if you have not finished typing the line when the
-  time is up, the line will repeat itself until you finish typing.
-- **Tempo** Just push any key, it will be considered as a correct key.
-- **Auto** Automatic typing. Sit and watch. Note that this does not block the
-  input, so you can still mess up the score by also trying to type in this mode.
-- **Blind** Only the next character to type is visible. The lyrics line and
-  other typing characters are not visible.
-- **Blank** Similar to blind, but furthermore, the next character to type is also
-  invisible. Line interval are also not provided. Score information, including
-  the number of correct line and skipped character, is visible. Sound feedback
-  is also not changed.
+QQ 音乐导入需要 Windows、正在运行且已登录的 QQ 音乐桌面客户端，以及完整缓存的音频和 QRC 资源。客户端未运行、未登录或会话不可用时，游戏会用当前界面语言给出相应提示。
 
-NOTE: Playing any game mode other than **Normal** will not save the high score
-for that play.
+每批导入会自动完成：
 
-Creating New Song
------------------
+1. 从项目目录、分区根目录、QQ 音乐进程信息、常用目录和配置中定位 `QQMusicCache`。
+2. 只在本次导入期间读取当前会话。
+3. 按最近使用顺序选择不同缓存，并与已有歌曲去重。
+4. 结合标题、歌手或原声专辑、时长、歌词正文与 Roma 时间轴匹配 QRC。
+5. 按语言过滤歌曲名、歌手、作词、作曲、编曲、制作人等非歌词行。
+6. 网络可用时与官方歌词响应核对完整时间轴。
+7. 本地生成无声调中文拼音；日语要求每句都有同一歌曲专属 `_qmRoma.qrc` 读音。
+8. 网络可用时交叉核对 QQ 音乐 Roma 响应；离线时只接受身份、时长和卡拉 OK 时间均能严格证明的本地读音，无法确认则跳过而不猜测。
+9. 在内存中解密 QMC2 音频并验证生成的 FLAC。
+10. 解析歌手原名和真正直接使用这首歌的作品。
+11. 选择经过验证的专辑封面，并尽可能匹配直接出处作品的海报。
+12. 以原子方式写入一个自包含的私有歌曲包。
 
-### Before you begins
+不可用候选不会占用每批 20 首的名额。再次执行导入会继续寻找后面的不同歌曲。
 
-Prepare the following:
+更多细节见 [本地 QQ 音乐曲库](docs/local-qqmusic.md)和
+[QQ 音乐互操作声明](QQMUSIC-INTEROPERABILITY-NOTICE.md)。
 
-- **Song media.** Can be audio, video, or YouTube video. For raw audio/video,
-  the guaranteed format is mp4 (H.264/AAC) for video, and mp4 (AAC) or mp3
-  for audio. For YouTube video, it is recommended to also download the video 
-  anyway (using a program like `youtube-dl`) to facilitate lyric timing.
-- **Song lyric.** For English, just the lyric itself is usually okay. Make sure
-  to check for any non-typeable characters and remove them beforehand. For
-  Japanese, see below.
-- **Song image.** This image is used as a preview image, and also background
-  image during loading/score screen. Can be in any major format.
+## 歌词、发音与图片来源
 
-#### Preparation of Japanese song
+- 日语发音来自同一首歌曲带时间轴的 QQ 音乐 Roma QRC，因此歌词作者指定的特殊唱法会直接保留。`latin-table/` 继承自
+  [TypingMania NEO](https://github.com/innocenat/typingmania)，只处理普通歌曲包中的假名，不会推测或覆盖导入歌曲的专属读音。
+- 中文拼音由本地的 [`pinyin-pro`](https://github.com/zh-lx/pinyin-pro) 生成。
+- 用户主动导入时，QQ 音乐提供已授权歌曲的元数据、官方时间轴歌词、歌手记录和专辑图片。
+- [Bangumi](https://bangumi.github.io/api/) 用于核对动画相关歌曲的直接出处作品原名与海报，不会用漫画、小说或其它改编源作品冒充动画出处。
+- [YouTube IFrame API](https://developers.google.com/youtube/iframe_api_reference) 仅用于兼容的 YouTube 歌曲包。
 
-Japanese song lyrics required some preparation. Reading is required for
-all Kanji in the lyrics.
+游戏不翻译歌曲名，只显示保存的原始标题。只有能够确认直接出处作品原名时才显示出处，否则留空，避免显示错误的翻译名或原作名。
 
-The system will recognize hiragana/katakana characters and punctuations,
-but will require reading for Kanji.
+主要组件和数据来源可在游戏的“关于此游戏”中打开；完整许可证清单见
+[第三方声明](THIRD-PARTY-NOTICES.md)。
 
-Punctuations like 「」【】 will be removed automatically from typing.
-。、… etc. will become . , ... respectively. For Kanji, use [] to specify
-the reading. For example,
+## 速度、演示与结算
 
-    強くなれる理由を知った 明日へ
+曲目选择页面的速度含义为：
 
-should become:
+- **整首平均**：在完整可输入时间轴中，每分钟需要输入的字母数。
+- **最快 5 秒**：任意连续 5 秒内最高的字母输入速率。
 
-    強[つよ]くなれる理[り]由[ゆう]を知[し]った 明日[あした]へ
+曲目选择、自动演示和结算页面使用相同的字母计数、歌词时间与窗口模型。第一句在 1.5 秒前出现时，会先显示简短的 3–2–1 预备倒计时，但不会移动媒体时间轴。自然完成后保留游玩画面 1.4 秒，再进入结算页面。
 
-Half-width space will require spacebar input during typing, but full-width
-space will be skipped automatically. Moreover, putting `|` character will
-create a little spacing in the typing romaji line to ease readability.
+## 曲库编辑与重置
 
-If you want to specify reading for hiragana/kanataka directly, use `<< >>`
-for example:
+“编辑曲目”支持键盘和鼠标多选。确认后，程序会暂存所选歌曲包、重建索引、只删除对应成绩并清理不再引用的私有元数据；如果在提交删除前中断，下次启动会自动回滚。三首示例歌曲不能被单独删除。
 
-    今[いま]でも生[い]きている<<ストーリーズ>>[Stories]
+“重置曲库”会删除所有新增歌曲和生成的元数据缓存、清空成绩，并恢复经过校验的三首示例歌曲。这两项功能都不会修改任何名为 `QQMusicCache` 的目录。
 
-You can also use `<<text>>[]` to make some part of lyrics non-typable.
+## 网络与部署
 
-### Using the visual editor
+启动、菜单、示例歌曲、导入后的本地歌曲、发音、计分、自动演示、按键雨和结算均可离线运行。只有用户主动导入、维护可选元数据/图片，或选择 YouTube 歌曲包时才会访问网络。
 
-*Visual editor is currently in development*
+QQ 音乐使用中国大陆服务线路。作品标题和海报查询会在 Bangumi 官方
+`bgm.tv`、`bangumi.tv`、`chii.in` 及其 API 之间共享很短的请求预算。重试次数有限，连续失败后会在当前批次停止可选网络请求，改用可以验证的本地数据或留空，不会阻塞正常游玩。
 
-### Using command line
+### 静态部署
 
-You will need `nodejs`, *Aegisub* (or other programs that can edit .ass file),
-a text editor, and a basic understanding of the command line to create a song 
-this way. You also need `ffmpeg` somewhere in your path.
+```sh
+npm run build-game
+```
 
-The `.ass` file to be converted requires the following in **Actor** field:
+静态文件会生成到 `dist/`，可部署到 GitHub Pages 或其它 Web 服务，并游玩部署中包含的歌曲包。
 
-- `Title` Song title. `{native_script} // {latin_script}`. Note that the Latin 
-  script is currently not used. If the native script is already in Latin, 
-  omitted the `//`.
-- `Subtitle` Same format.
-- `Artist` Same format.
-- `Image` File name of song image. Must be in the same folder as the subtitle 
-  file.
-- `Audio` or `Video` or `YouTube` Audio/Video file, or YouTube Video ID.
-- `Language` Lyric language. 2-letter, e.g. EN, JP, etc.
-- `Lyrics` These are typing lines.
-
-Other than the lyrics line where the timing information is used, the other 
-lines can be at any time. For Aegisub timing guide, see
-https://unanimated.github.io/timing-basics.htm. Note that lead-in, lead-out,
-scene-bleed, etc. do not apply here.
+纯静态网站不能使用 QQ 音乐导入、启动时文件扫描、事务式删除/重置和打包图片提取；这些功能需要本地服务。请勿把私有 `data/` 内容放入公开构建。
 
-Finally, run:
-
-    node /path/to/build-all-songs.js
-
-This will convert all `.ass` files in the current working directory, as long
-as any in the sub-folder, to `.typingmania` files, ready to be played.
-
-If the program returned an error, you likely missed some Kanji
-reading in the lyrics.
+## 隐私与公开发布
 
-The example data also includes the original `.ass` file.
+本地服务只监听 `127.0.0.1`。所有修改数据的接口都需要随机同源令牌。QQ 音乐 Cookie、账号标识和 ekey 只在当前操作的内存中使用，不记录、不保存。
 
-### Building song index
+Git 会排除：
 
-If you are playing by yourself, you do not need to build the index.
-Refer to [Using local file](#using-local-file) section to play your song
-locally.
+- 所有 `QQMusicCache` 目录；
+- `data/` 中生成的内容；
+- 导入的媒体、歌词、封面、海报、会话、日志和 PID；
+- 本地参考图片与环境变量文件。
 
-You can also send the resulting `.typingmania` file to other people to play
-without needing a song index too.
+发布前可运行：
 
-For setting up your own TypingMania instance, you need to build a song index,
-typically `songs.json`, for the game to know what songs are available.
+```sh
+npm run audit-public
+```
 
-The easiest way to do this is to create the structure inside `data/` folder
-to the structure you wanted. Then, do:
+审计程序会检查已跟踪及准备发布的未跟踪文件，拦截私有媒体、非示例歌曲包、用户目录、运行状态和常见凭据格式。
 
-    npm run build-index
+## Song Studio
 
-This will automatically create an index file `songs.json` with the same
-structure as `data/` folder.
+启动本地服务后打开：
 
-To have more control over a collection name, you can create `info.txt` inside
-the folder. The first line of the file will be used as a collection name,
-and the rest will be the collection description.
+```text
+http://127.0.0.1:8765/preview.html
+```
 
-Refers to [File format](#file-format) section for specific format of
-`songs.json` index file.
+`packer.html` 是兼容入口。Preact 和 HTM 已存放在 `vendor/editor`，编辑器不依赖公共 CDN；YouTube 预览仍需连接 YouTube，本地音视频预览不需要。
 
-Score Calculation
------------------
+## 项目结构
 
-Each character in the song lyrics contains a concept of *scoring characters*.
-For Latin characters, the *scoring character* is always 1. For Japanese,
-however, this is different. For example, ち may be typed as ti and chi,
-but the *scoring character* is always 2. It is always the number of
-the shortest possible sequence of keypresses to input that character.
+```text
+assets/              字体、界面图片和音效的源文件及打包文件
+docs/                用户与互操作说明
+latin-table/         字符规范化与日语罗马字表
+scripts/             构建、审计、本地服务、启动和导入逻辑
+scripts/local/       本地曲库模块及测试
+songs/               三首公开示例歌曲包
+src/                 浏览器游戏、界面、媒体、输入、特效和编辑器代码
+tools/runtime/       已校验的 Windows Node.js 运行环境压缩包和许可证
+vendor/editor/       本地 Song Studio 浏览器依赖和许可证
+vendor/runtime/      固定版本的离线导入依赖和许可证
+```
 
-All keypresses up to the *scoring character* are used for score
-calculation. All further keypress will also be used to calculate
-typing speed, but cannot generate any positive score.
+生成的构建、开发依赖、浏览器自动化状态、运行环境解压目录和私有曲库数据都不会纳入版本控制。
 
-For each correct keypress, the score is calculated as
-`1000 + CPM Bonus + Combo Bonus`. CPM Bonus is calculated as
-`Current Average CPM * 0.25`, and Combo Bonus is just the current combo
-chain.
-
-For each incorrect key press, a penalty of 500 points is applied. Note that
-this only applies where a lyrics line is active. Extra keypress while waiting
-will not generate penalties.
+## 验证
 
-Furthermore, there is also a line bonus. If you can finish a lyrics line,
-then you get 10% of the score you gained during that line. If you can
-finish the line without any mistake, you gain another 15%.
-
-### Score Class
-
-Classes are award based on the score relative to the base score. The base score
-is calculated by: `number_of_char × 1250`, where `number_of_char` refers to the
-*scoring character*, or the minimum number of characters required to
-complete the song.
-
-<details>
-<summary>Score ratio for each class</summary>
-
-| Percent  | Class |
-| -------- | ----- |
-|   > 125% |   SSS |
-|   > 110% |    SS |
-|   > 105% |    S+ |
-|   > 100% |     S |
-|    > 95% |    A+ |
-|    > 90% |     A |
-|    > 85% |    B+ |
-|    > 80% |     B |
-|    > 75% |    C+ |
-|    > 70% |     C |
-|    > 60% |    D+ |
-|    > 50% |     D |
-|    > 40% |    E+ |
-|    > 30% |     E |
-|    > 20% |    F+ |
-|    < 20% |     F |
-
-</details>
-
-<details>
-<summary>REFERENCE: TypingMania ODYSSEY Score Calculation</summary>
-
-The original SightSeeker Studio's TypingMania ODYSSEY score calculation is
-very simple. The maximum score is 200,000, and each correct keypress gain you
-`200,000 ÷ scoring character`. Each incorrect keypress loss you half of the
-gain (`-0.5 * (200,000 ÷ scoring character)`).
-
-Possibly due to a bug in character count calculation, it is possible to get 
-more than 200,000 points by always typing the longest romaji of each character.
-
-The combo does not affect the score at all.
+```sh
+npm test
+npm run build-game
+npm run audit-library
+npm run verify-runtime
+npm run audit-public
+```
 
-</details>
+也可以一次运行全部检查：
 
-Supported Browsers
------------------
+```sh
+npm run check
+```
 
-- The latest version of Google Chrome and Mozilla Firefox.
-- Untested on Microsoft Edge, but should work.
-- Safari has a delay between the actual and reported media time,
-  resulting in a slight (but noticeable) delay of the lyrics line.
+Jest 固定使用单进程，因此测试结束后不会在 Windows 留下工作进程池。
 
-History
--------
+## 许可证
 
-Back in 2013, I made a TypingMania Odyssey clone in JavaScript, which is
-available in the `master` branch.
+TypingManiaNovel 使用 Apache-2.0 许可证，详见 [LICENSE](LICENSE)。第三方代码和资源保留各自的许可证与声明。
 
-That version of TypingMania was almost a direct clone of TypingMania ODYSSEY,
-except for the score calculation system which I did not reverse-engineer
-at that time.
-
-I have been trying to rewrite this project since 2016, but this attempt in
-2020/2021 is the first successful attempt. This comes after a lot of
-advancements in HTML5 technologies, including Web Audio API, HTML5 Video,
-and ES6 module.
-
-The current TypingMania NEO is a pure HTML5 and JavaScript program. No
-external libraries were used. The editor, however, uses the Preact library.
-
-The Japanese Kana input system is extensively tested using unit tests.
-
-### Different from TypingMania ODYSSEY
-
-- It is written in HTML5 (HTML+JS), so it runs in 2021 after Adobe dropped
-  Flash support in December 2020.
-- Revamp UI, including changes to correct terminology: Solve -> Skipped,
-  Corrected Percent -> Accuracy, etc. Also include split progress bar for song
-  total time.
-- New score calculation algorithm (see [Score calculation](#score-calculation))
-- Maybe better Japanese handling. This version accepts almost all Romaji
-  sequences that result in the same sentence.
-- No longer differentiate between lyrics and typing line. *Furigana* must be
-  added to Kanji lyrics. Most other symbols are converted automatically to
-  typable text.
-- Add sound effect for typing/missed/skipped line.
-- Can skip line using `Tab` key.
-- Can load a local file.
-- **Can load the video directly from YouTube**
-
-### Different from original TypingMania
-
-- Different score calculation.
-- No auto-play mode.
-- Better performance. This is much faster than the older version.
-- Since the original TypingMania was an ODYSSEY clone, all ODYSSEY differences
-  also apply.
-
-Project Structure
------------------
-
-- `assets/raw` folder contains the actual assets file used.
-- `assets/assets.dat` is a packed assets file. This can be generated with
-  `npm run build-assets`
-- `data/songs.json` is the main song index file. I suggest putting all songs 
-  file (.typingmania) under this folder, but it is not required.
-- `docs` contains documentation-related material.
-- `latin-table` is a folder containing transliterating table for the game.
-  Check `README` in that folder for more detail.
-- `scripts` contains nodejs scripts for processing game media, etc.
-- `src` is the main source code folder.
-
-Installation & Building
------------------------
-
-Note that this game can runs directly from the source code folder. The
-`index.html` file in the project root is a full game by itself. However,
-it might not be suitable for production releases because it loads multiple
-javascript files.
-
-To get a production-ready file, either download from the ~~GitHub releases page~~ *not available yet*
-or build from the source code below.
-
-In the `index.html` file there are two configurable parameters: `assets_url`
-and `songs_url`. `assets_url` refers to the path to the `assets.dat` file, and 
-the `songs_url` refers to the song index file, both relative to the 
-`index.html`.
-
-The recommendation is to create a `data/` folder and put the index file
-`songs.json` along with other `.typingmania` files there, but it is not
-required, and you can put it however you want. Noted that URLs inside
-`songs.json` are also relative to `index.html`.
-
-This game can be hosted on any web server capable of serving static files.
-
-### Building from source
-
-To build the game, run:
-
-    npm run build-game
-
-This will create a `dist/` folder containing files suitable for distribution.
-
-If you make a change to the assets file, you can rebuild the `assets.dat` by:
-
-    npm run build-assets
-
-Note that the `build-game` command does not rebuild assets. Run `build-assets`
-before `build-game` to build a redistributable file with new assets.
-
-File Format
------------
-
-### `.typingmania` file format
-
-`.typingmania` is a binary file in a RIFF format. It is basically a very
-simple archive. It contains 2 chunks: `LIST` and `FILE`.
-
-#### `.typingmania` RIFF
-
-| Byte range | Type  | Description                   |
-|------------|-------|-------------------------------|
-| 0-3        | 4CC   | 'TPMN' file signature         |
-| 4-7        | u32le | Total file length - 8         |
-| 8-11       | 4CC   | 'LIST'                        |
-| 12-15      | u32le | Number of file in the archive |
-| 16+        |       | `<<file_entry>>`              |
-|            | 4CC   | 'FILE'                        |
-|            | bin   | File contents                 | 
-
-#### `<<file_entry>>`
-
-| Byte range  | Type  | Description           |
-|-------------|-------|-----------------------|
-| 0           | u8    | Length of file name   |
-| 1-(n+1)     | str   | File name (UTF-8)     |
-| (n+1)-(n+4) | u32le | Offset to the start of this file in the archive | 
-| (n+5)-(n+8) | u32le | File length           | 
-
-### `song.json` file format
-
-This is a standard JSON file encoded in UTF-8. It contains the following
-fields:
-
-- `title`: Title in song native language
-- `latin_title`: Title in Latin alphabet (currently not used)
-- `subtitle`: Subtitle in song native language
-- `latin_subtitle`: Subtitle in Latin alphabet (currently not used)
-- `artist`: Artist in song native language
-- `latin_artist`: Artist in Latin alphabet (currently not used)
-- `language`: Lyrics language. 2 letter format. (e.g. EN, JP, etc.)
-- `cpm`: Character per minute of the lyric line, 90 percentile
-- `max_cpm`: Character per minute of the lyric lines, maximum
-- `duration`: Song duration, in second
-- `image`: Image file name in the same `.typingmania` archive
-- Media file specification. Must have one of the below:
-  - `audio`: Audio file name in the same `.typingmania` archive
-  - `video`: Video file name in the same `.typingmania` archive
-  - `youtube`: YouTube Video ID
-
-### `lyrics.csv` file format
-
-This is a CSV file containing lyrics and timing information. The line
-format is `{start_time},{end_time},{lyric}`. The file must be encoded
-in UTF-8.
-
-- `start_time` is the line start time, in millisecond.
-- `end_time` is the line end time, in millisecond.
-- `lyric` is the lyric (typing).
-
-The line must be sorted, by `start_time` and there must not be any overlap
-between each line.
-
-### `songs.json` file format
-
-This is a standard JSON file encoded in UTF-8. It contains an array of songs
-or song collections.
-
-#### `song` object
-
-Basically the same as `song.json` format, except also has the `url` property
-to specify the URL to the `.typingmania` file (relative to `index.html`).
-
-#### `song collection` object
-
-- `type`: Must be "collection"
-- `name`: Collection name
-- `desciption`: Collection description
-- `contents`: Array of songs or song collections.
-
-License & Copyright
---------------------
-The code and assets are copyrighted under the term of the Apache 2.0 license.
-
-This game uses
-[Dustyroom Casual Game Sound - One Shot SFX Pack](http://dustyroom.com/free-casual-game-sounds/).
-
-This game also uses the Iosevka Etoile, Noto Sans CJK JP, and Open Sans fonts.
-Iosevka font family is licensed under SIL Open Font License. Noto Sans and
-Open Sans font families are licensed under the Apache 2.0 License.
-
-When creating a song to use with the game, make sure you have the proper right
-to the video/audio used. TypingMania NEO and its developer does not take
-responsibility for managing the copyright of any content used by the user.
-
-日本語
-------
-TypingMania NEOは歌の歌詞に合わせてタイピングするタイピングソフトです。元々のTypingMania ODYSSEYはSightSeeker Studioによる開発し、残念ながら2009年に開発中止しまいました。SightSeeker StudioのTypingManiaはAdobe Flashで開発しました。
-
-2013年に、私はHTML5によるTypingManiaのパクリのソフトを開発し、2021年にこのTypingMania NEOを完成しました。HTML5でどんなブラウザにもプレイをでき、YouTubeの音源としても利用できるようにしました。2020年をもってAdobe Flashサポート終了を伴い、TypingMania ODYSSEYはプレイできなくなり、TypingMania NEOを誕生しました。
-
-### 対応ブラウザ
-- 最新型のGoogle Chrome, Mozilla Firefox
-- Safariの音声はちょっと遅れて、歌詞のタイミングが合わない場合が多い。
-
+TypingManiaNovel 是独立项目，与腾讯、腾讯音乐娱乐、QQ 音乐、Bangumi、Google、YouTube、Node.js 以及第三方声明中列出的其它项目不存在隶属、合作或背书关系。

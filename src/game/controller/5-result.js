@@ -5,14 +5,20 @@ export default class ResultController {
 
   async run () {
     this.game.background_screen.showResultUI(true)
+    this.game.songinfo_screen.hide()
     this.game.result_screen.show()
 
     if (this.game.game_mode === 'normal') {
       // Only save high score if in normal mode
       this.game.songs.current_song.saveHighScore(this.game.score.getClass(), this.game.score.score)
     }
-    this.game.score.setToResultScreen(this.game.result_screen)
-    this.game.result_screen.card_value[0].text(this.game.songs.current_song.title)
+    const song = this.game.songs.current_song
+    this.game.result_screen.setSong(song)
+    this.game.score.setToResultScreen(this.game.result_screen, {
+      duration: this.game.score.play_duration || song.duration,
+      referenceAverageCpm: Number(song.cpm) || 0,
+      referencePeakCpm: Number(song.max_cpm) || 0,
+    })
 
     await this.game.input.waitForAnyKey()
 

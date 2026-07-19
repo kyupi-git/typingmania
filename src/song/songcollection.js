@@ -9,11 +9,13 @@ export default class SongCollection {
       // For root collection
       this.name = ':root:'
       this.description = ''
+      this.translations = {}
 
       contents = options
     } else {
       this.name = options.name
       this.description = options.description
+      this.translations = options.translations || {}
 
       contents = options.contents
     }

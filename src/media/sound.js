@@ -25,6 +25,9 @@ export default class Sound {
 
     // Active YouTube Media (for sound setting)
     this.youtube_media = []
+    this.youtube_api_request = null
+    this.youtube_api_available = Boolean(window.YT?.Player)
+    this.youtube_retry_after = 0
 
     // Default sound volume
     this.setSoundValue(100)
@@ -67,31 +70,62 @@ export default class Sound {
     }
   }
 
-  initializeSound () {
-    return new Promise((resolve, reject) => {
-      if (this.context.state === 'suspended') {
-        this.context.resume()
-      }
-      setTimeout(() => {
-        if (this.context.state === 'suspended') {
-          reject('SOUND_ERROR')
-        } else {
-          resolve()
-        }
-      }, 50)
-    })
+  async initializeSound () {
+    if (this.context.state === 'running') {
+      return
+    }
+    if (this.context.state === 'closed') {
+      throw new Error('SOUND_ERROR')
+    }
+
+    // Audio device startup can take longer than 50 ms on the first page load.
+    // The resume promise resolves only after the context has actually resumed.
+    await this.context.resume()
+    if (this.context.state !== 'running') {
+      throw new Error('SOUND_ERROR')
+    }
   }
 
-  loadYouTubeAPI () {
-    return new Promise((resolve, reject) => {
-      window.onYouTubeIframeAPIReady = () => {
-        resolve()
-      }
+  loadYouTubeAPI (timeoutMs = 2500) {
+    if (window.YT?.Player) {
+      this.youtube_api_available = true
+      this.youtube_retry_after = 0
+      return Promise.resolve(true)
+    }
+    if (Date.now() < Number(this.youtube_retry_after || 0)) {
+      return Promise.resolve(false)
+    }
+    if (!this.youtube_api_request) {
+      this.youtube_api_request = new Promise(resolve => {
+        const previousReady = window.onYouTubeIframeAPIReady
+        window.onYouTubeIframeAPIReady = () => {
+          previousReady?.()
+          this.youtube_api_available = true
+          resolve(true)
+        }
 
-      // Load YouTube iframe API
-      const tag = document.createElement('script')
-      tag.src = 'https://www.youtube.com/iframe_api'
-      document.body.append(tag)
+        let tag = document.querySelector('script[data-typingmania-youtube]')
+        if (!tag) {
+          tag = document.createElement('script')
+          tag.src = 'https://www.youtube.com/iframe_api'
+          tag.dataset.typingmaniaYoutube = 'true'
+          document.body.append(tag)
+        }
+        tag.addEventListener('error', () => resolve(false), { once: true })
+      })
+    }
+
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        this.youtube_retry_after = Date.now() + 60_000
+        resolve(false)
+      }, timeoutMs)
+      this.youtube_api_request.then(available => {
+        clearTimeout(timer)
+        if (available) this.youtube_retry_after = 0
+        else this.youtube_retry_after = Date.now() + 60_000
+        resolve(available)
+      })
     })
   }
 
@@ -106,6 +140,9 @@ export default class Sound {
       case 'audio':
         return new AudioMedia(song.media_url, connectAudioDestinationFunc)
       case 'youtube':
+        if (!window.YT?.Player) {
+          throw new Error('YOUTUBE_UNAVAILABLE')
+        }
         const yt = new YouTubeMedia(song.media_url, this.getYouTubeVolume())
         this.youtube_media.push(yt)
         return yt

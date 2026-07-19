@@ -53,6 +53,10 @@ export default class Typing {
     return scoring_char
   }
 
+  getPlayableLineCount () {
+    return this.lines.filter(line => line.getCharacterCount() > 0).length
+  }
+
   // This is used to draw split progressbar
   getIntervals () {
     const t = []

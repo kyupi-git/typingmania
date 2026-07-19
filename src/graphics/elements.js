@@ -96,6 +96,11 @@ class TextElem extends BoxElem {
 
   color (style) {
     style._setToText(this.el)
+    if (this.el.style.color === 'white') {
+      this.el.style.textShadow =
+        '0 2px 4px rgba(18, 24, 32, .96), 0 0 8px rgba(18, 24, 32, .78)'
+      this.el.style.webkitTextStroke = '.35px rgba(52, 58, 66, .92)'
+    }
     return this
   }
 
@@ -106,6 +111,17 @@ class TextElem extends BoxElem {
 
   wrap () {
     this.el.style.whiteSpace = 'normal'
+    return this
+  }
+
+  clampLines (lines) {
+    this.el.style.display = '-webkit-box'
+    this.el.style.whiteSpace = 'normal'
+    this.el.style.overflow = 'hidden'
+    this.el.style.overflowWrap = 'anywhere'
+    this.el.style.wordBreak = 'normal'
+    this.el.style.webkitBoxOrient = 'vertical'
+    this.el.style.webkitLineClamp = `${Math.max(1, Number(lines) || 1)}`
     return this
   }
 
@@ -128,6 +144,11 @@ class ImageElem extends ElementBase {
 
   fit (fit) {
     this.el.style.objectFit = fit
+    return this
+  }
+
+  objectPosition (position) {
+    this.el.style.objectPosition = position
     return this
   }
 

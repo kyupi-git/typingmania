@@ -1,0 +1,21 @@
+* text=auto eol=lf
+
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.dat binary
+*.flac binary
+*.gif binary
+*.jpeg binary
+*.jpg binary
+*.mp3 binary
+*.png binary
+*.typingmania binary
+*.wav binary
+*.webp binary
+*.woff2 binary
+*.zip binary
+
+# Preserve vendored sources and reproduced third-party license text exactly.
+vendor/** -whitespace
+tools/runtime/NODE-LICENSE.txt -whitespace

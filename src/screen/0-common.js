@@ -1,6 +1,6 @@
 import { Fill, Font, Stroke } from '../graphics/styles.js'
 
-export const UIFont = Font('Iosevka Etoile').weight('500')
+export const UIFont = Font('"Iosevka Etoile", "Noto Sans CJK JP", sans-serif').weight('500')
 export const SongFont = Font('Noto Sans CJK JP').weight('500')
 export const NumberFont = Font('Open Sans').weight('700')
 

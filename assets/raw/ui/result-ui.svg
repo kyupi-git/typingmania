@@ -1,21 +1,15 @@
 <svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect width="1920" height="1080" fill="url(#paint0_linear)"/>
-<rect x="1230" y="375" width="600" height="645" rx="30" fill="white" fill-opacity="0.75"/>
-<defs>
-<linearGradient id="paint0_linear" x1="0" y1="0" x2="1047" y2="1080" gradientUnits="userSpaceOnUse">
-<stop stop-opacity="0.75"/>
-<stop offset="0.19"  stop-opacity="0.5535"/>
-<stop offset="0.34"  stop-opacity="0.405750"/>
-<stop offset="0.47"  stop-opacity="0.2865"/>
-<stop offset="0.565" stop-opacity="0.2085"/>
-<stop offset="0.65"  stop-opacity="0.1455"/>
-<stop offset="0.73"  stop-opacity="0.0945"/>
-<stop offset="0.802" stop-opacity="0.05625"/>
-<stop offset="0.861" stop-opacity="0.0315"/>
-<stop offset="0.91"  stop-opacity="0.01575"/>
-<stop offset="0.952" stop-opacity="0.006"/>
-<stop offset="0.982" stop-opacity="0.0015"/>
-<stop offset="1" stop-opacity="0"/>
-</linearGradient>
-</defs>
+  <rect width="1920" height="1080" fill="#050917" fill-opacity="0.68"/>
+  <rect width="1920" height="1080" fill="url(#paint0_radial)"/>
+  <rect width="1920" height="1080" fill="url(#paint1_radial)"/>
+  <defs>
+    <radialGradient id="paint0_radial" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1720 110) rotate(137) scale(760 520)">
+      <stop stop-color="#8D5BCE" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#8D5BCE" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="paint1_radial" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(130 960) rotate(-42) scale(780 520)">
+      <stop stop-color="#3E8FC8" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#3E8FC8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
 </svg>

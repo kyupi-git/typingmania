@@ -1,5 +1,5 @@
-import { Component, createRef, h } from 'https://unpkg.com/preact?module'
-import htm from 'https://unpkg.com/htm?module'
+import { Component, createRef, h } from '../../../vendor/editor/preact.module.js'
+import htm from '../../../vendor/editor/htm.module.js'
 
 const html = htm.bind(h)
 

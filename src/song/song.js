@@ -13,6 +13,7 @@ export default class Song {
     this.media_url = ''
     this.lyrics_csv = ''
     this.image_url = ''
+    this.poster_url = ''
 
     this.loadHighScore()
   }
@@ -30,6 +31,11 @@ export default class Song {
     this.cpm = options.cpm
     this.max_cpm = options.max_cpm
     this.duration = options.duration
+    this.source = options.source || this.source || {}
+    this.origin = options.origin || this.origin || null
+    this.preview_image_url = options.preview_image_url || ''
+    this.preview_album_url = options.preview_album_url || ''
+    this.preview_image_is_poster = Boolean(options.preview_image_is_poster)
 
     if ('youtube' in options) {
       this.media_type = 'youtube'
@@ -67,6 +73,16 @@ export default class Song {
     }
   }
 
+  clearHighScore () {
+    const key = this._getHighScoreKey()
+    try {
+      window.localStorage.removeItem(key)
+      window.localStorage.removeItem(key + ':class')
+    } catch {}
+    this.high_score = 0
+    this.high_score_class = ''
+  }
+
   async load (progress_handler, abort_signal) {
     if (this.loaded) {
       return this
@@ -88,6 +104,9 @@ export default class Song {
     this._setMetaData(song_meta)
 
     this.image_url = packed_song.getFileAsURL(song_meta.image)
+    this.poster_url = song_meta.poster && packed_song.hasFile(song_meta.poster)
+      ? packed_song.getFileAsURL(song_meta.poster)
+      : ''
     this.lyrics_csv = packed_song.getAsText('lyrics.csv')
 
     if (this.media_type === 'youtube') {

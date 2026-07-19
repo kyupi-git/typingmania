@@ -1,13 +1,20 @@
 import { format_decimal_fixed, format_number_comma, format_number_fixed } from '../screen/0-common.js'
+import {
+  buildPerformanceSummary,
+  nextTension,
+} from './performance.js'
 
 export default class Score {
-  constructor (scoring_char) {
+  constructor (scoring_char, { totalLines = 0 } = {}) {
     this.score = 0
+    this.scoring_char = scoring_char
+    this.total_lines = totalLines
 
     this.combo = 0
     this.max_combo = 0
 
     this.completed_line = 0
+    this.perfect_line = 0
     this.skipped_line = 0
     this.skipped_char = 0
 
@@ -19,6 +26,10 @@ export default class Score {
 
     this.typing_time = 0
     this.last_type_time = 0
+    this.play_duration = 0
+
+    this.tension = 0
+    this.performance_events = []
 
     // Calculate base score
     this.base_score = scoring_char * 1250
@@ -69,9 +80,10 @@ export default class Score {
     this.line_score = 0
   }
 
-  onLineEnd (leftover) {
+  onLineEnd (leftover, timestamp = this.last_type_time) {
     if (leftover === 0) {
       this.completed_line++
+      if (this.missed_in_this_line === 0) this.perfect_line++
 
       // Line complete bonus
       this.score += Math.ceil(this.line_score * 0.1)
@@ -83,7 +95,27 @@ export default class Score {
     } else {
       this.skipped_char += leftover
       this.skipped_line++
+      this.recordPerformance(timestamp, 'skip', leftover)
     }
+  }
+
+  recordPerformance (timestamp, outcome, severity = 1) {
+    this.tension = nextTension(this.tension, outcome, severity)
+    const previousTime = this.performance_events.at(-1)?.time || 0
+    const time = Math.max(previousTime, Number(timestamp) || 0)
+    this.performance_events.push({
+      time,
+      outcome,
+      tension: this.tension,
+    })
+  }
+
+  finish (timestamp) {
+    this.play_duration = Math.max(
+      this.play_duration,
+      Number(timestamp) || 0,
+      this.performance_events.at(-1)?.time || 0,
+    )
   }
 
   // This get called on every typing
@@ -96,6 +128,7 @@ export default class Score {
       this.missed++
       this.missed_in_this_line++
       this.combo = 0
+      this.recordPerformance(timestamp, 'miss')
     } else {
       this.correct++
       this.combo += score_factor
@@ -112,6 +145,7 @@ export default class Score {
       this.line_score += score
 
       this.typing_time += timestamp - this.last_type_time
+      this.recordPerformance(timestamp, 'correct')
     }
 
     this.last_type_time = timestamp
@@ -138,20 +172,35 @@ export default class Score {
     }
   }
 
-  setToResultScreen (screen) {
-    screen.score_class.text(this.getClass())
-    screen.score_value.text(format_number_comma(this.score))
+  getResultData (duration = this.play_duration) {
+    const performance = buildPerformanceSummary(
+      this.performance_events,
+      Math.max(duration || 0, this.play_duration || 0),
+    )
+    return {
+      className: this.getClass(),
+      score: this.score,
+      maxCombo: this.max_combo,
+      scoringChar: this.scoring_char,
+      totalInputs: this.correct + this.missed,
+      correct: this.correct,
+      missed: this.missed,
+      completedLine: this.completed_line,
+      perfectLine: this.perfect_line,
+      totalLines: this.total_lines,
+      skippedLine: this.skipped_line,
+      skippedChar: this.skipped_char,
+      averageCpm: this.getCPM(),
+      rollingPeakCpm: performance.peakPace,
+      accuracy: this.getCorrectPercent() * 100,
+      overallAccuracy: this.getCorrectPercentWithSkipped() * 100,
+      averageTension: performance.averageTension,
+      penalty: this.missed * 500,
+      performance,
+    }
+  }
 
-    screen.card_value[1].text(this.getClass())
-    screen.card_value[2].text(format_number_comma(this.score))
-    screen.card_value[3].text(format_number_fixed(this.max_combo, 3))
-    screen.card_value[4].text(format_number_fixed(this.correct, 3))
-    screen.card_value[5].text(format_number_fixed(this.missed, 3))
-    screen.card_value[6].text(format_number_fixed(this.completed_line, 3))
-    screen.card_value[7].text(format_number_fixed(this.skipped_line, 3))
-    screen.card_value[8].text(format_number_fixed(this.skipped_char, 3))
-    screen.card_value[9].text(format_number_fixed(this.getCPM(), 3))
-    screen.card_value[10].text(format_decimal_fixed(this.getCorrectPercent() * 100, 1, 1) + '%')
-    screen.card_value[11].text(format_decimal_fixed(this.getCorrectPercentWithSkipped() * 100, 1, 1) + '%')
+  setToResultScreen (screen, options = {}) {
+    screen.updateResult(this.getResultData(options.duration), options)
   }
 }

@@ -1,5 +1,5 @@
 import { test } from '@jest/globals'
-import TypingChar from './typingchar.js'
+import TypingChar, { voiceJapaneseRomanization } from './typingchar.js'
 
 function make_chars_0 () {
   let chars = []
@@ -34,7 +34,7 @@ describe('Initialized properly', () => {
   test('Normal initialization', () => {
     const chars = make_chars_0()
     expect(chars[0].typings).toEqual(['a', 'b', 'c'])
-    expect(chars[1].typings).toEqual(['', ' '])
+    expect(chars[1].typings).toEqual([''])
     expect(chars[2].typings).toEqual(['a', 'b', 'zz'])
     expect(chars[3].typings).toEqual(['a', 'b'])
     expect(chars[4].typings).toEqual(['zz'])
@@ -42,6 +42,25 @@ describe('Initialized properly', () => {
     expect(chars[0].is_blank).toBeFalsy()
     expect(chars[1].completed).toBeTruthy()
     expect(chars[1].is_blank).toBeTruthy()
+  })
+
+  test('accented and full-width text becomes plain letter targets', () => {
+    const character = new TypingChar('Café！', ['Ｃａｆé！ 2026'])
+    character.initialize()
+    expect(character.typings).toEqual(['cafe'])
+  })
+
+  test('voiced Japanese iteration marks repeat the voiced reading', () => {
+    expect(voiceJapaneseRomanization('ka')).toBe('ga')
+    expect(voiceJapaneseRomanization('shi')).toBe('ji')
+    expect(voiceJapaneseRomanization('tsu')).toBe('zu')
+    expect(voiceJapaneseRomanization('fu')).toBe('bu')
+
+    const previous = new TypingChar('か', ['ka', 'kya'])
+    const repeated = new TypingChar('ゞ', [':RUBY_REPEAT_DAKUTEN'], previous)
+    previous.initialize()
+    repeated.initialize()
+    expect(repeated.typings).toEqual(['ga', 'gya'])
   })
 })
 

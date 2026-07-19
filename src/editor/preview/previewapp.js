@@ -1,5 +1,5 @@
-import { Component, h } from 'https://unpkg.com/preact?module'
-import htm from 'https://unpkg.com/htm?module'
+import { Component, h } from '../../../vendor/editor/preact.module.js'
+import htm from '../../../vendor/editor/htm.module.js'
 import Song from '../../song/song.js'
 import Typing from '../../typing/typing.js'
 import PreviewSongInfo from './previewsonginfo.js'

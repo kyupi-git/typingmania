@@ -1,34 +1,28 @@
 Latin Table
 ===========
 
-TypingMania NEO only allow limited ASCII character to be typed in the game.
-However, song lyrics often include other character for styling, etc. Including
-Japanese lyrics, the Latin Table provide translation between each character
-and its appropriate latin character.
+TypingManiaNovel accepts letter-key input while lyrics may contain Japanese
+kana, full-width characters, styled Latin characters, and display-only
+symbols. This table, inherited from TypingMania NEO and maintained in this
+repository, maps those characters to accepted Latin input sequences. It is
+also the built-in Japanese kana/romaji implementation; no external
+romanization service is contacted during play or QQ Music import.
 
-While build-csv.js script was initially use for seeding the CSV table,
-the final table was enhanced by hand so do not re-run the script if you
-do not know what you are doing.
+`build-csv.js` can seed mapping CSV files, but the checked-in tables contain
+carefully reviewed manual entries. Do not regenerate them without reviewing
+the resulting diff.
 
-Available mapping table:
- - `japanese-kana` : Japanese Hiragana and Katakana
-    (Unicode BMP "Hiragana" and "Katakana")
- - `japanese-katakana-half` : Half Width Katakana
-    (Second half of Unicode BMP "Halfwidth and Fullwidth Forms")
- - `cjk-symbol` : CJK Symbol
- - `full-width` : Full Width Latin Character/Symbol
-    (First half of Unicode BMP "Halfwidth and Fullwidth Forms")
- - `enclosed-alnum` : Enclosed form
-   (Unicode BMP "Enclosed Alphanumerics" and partially "Enclosed CJK Letters and Months")
- - `latin-extended` : Unicode BMP: Latin-1 Supplement, Latin Extended-A, Latin Extended-B, Latin Extended Additional
- - `quote` : Smart Quatation Mark
-   (Unicode "Quotation Mark=Yes")
+Available mapping tables:
 
-The main modifications by hand are:
+- `japanese-kana`: Hiragana and Katakana
+- `japanese-kana-halfwidth`: half-width Katakana
+- `cjk-symbols`: CJK symbols
+- `full-width`: full-width Latin characters and symbols
+- `enclosed-alnum`: enclosed alphanumerics and selected enclosed CJK forms
+- `latin-extended`: Latin-1 Supplement and Latin Extended blocks
+- `quote`: Unicode quotation marks
 
- - Full-width space and Japanese quotation mark 「」『』 map to empty string
-   to flow better with the song lyrics. Of course, typing space
-   or [ ] is also accepted as valid.
- - Add reading for multiple kana, and for small kana by itself.
- - Special handling for っ ッ ゝ ゞ ヽ ヾ
- - And a bit more I might have forgot to make a note of.
+Notable rules include alternate kana input sequences, standalone small kana,
+and special handling for `っ`, `ッ`, `ゝ`, `ゞ`, `ヽ`, and `ヾ`. Display-only
+spacing and punctuation remain visible in lyrics but do not require a
+keypress.

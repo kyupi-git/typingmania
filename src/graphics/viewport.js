@@ -1,9 +1,6 @@
 import { applyReset } from './graphicsutil.js'
 
-// Handle auto-resize of game DOM element
-// Previous version of TypingMania in 2013 use complicated
-// calculation of DOM sizing and position.
-// Now we just use `transform: scale` on the parent element.
+// Scale the fixed-resolution game viewport to the available browser area.
 export default class Viewport {
   constructor (width, height) {
     this.width = width

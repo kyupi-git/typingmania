@@ -1,5 +1,5 @@
-import { Component, h } from 'https://unpkg.com/preact?module'
-import htm from 'https://unpkg.com/htm?module'
+import { Component, h } from '../../../vendor/editor/preact.module.js'
+import htm from '../../../vendor/editor/htm.module.js'
 import { format_time } from '../../screen/0-common.js'
 
 const html = htm.bind(h)

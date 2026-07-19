@@ -1,0 +1,12 @@
+{
+  "name": "typingmania-offline-runtime-dependencies",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned production dependencies redistributed for offline TypingManiaNovel startup.",
+  "type": "module",
+  "dependencies": {
+    "@clamber_l/crypto": "0.1.12",
+    "music-metadata": "11.14.0",
+    "pinyin-pro": "3.28.1"
+  }
+}

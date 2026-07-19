@@ -1,13 +1,18 @@
 import { format_time } from '../../screen/0-common.js'
 import HTMLTypingLine from '../../typing/dom/htmltypingline.js'
-import AutoMode from '../automode.js'
+import { nextPlayableTypingKey } from '../../typing/typing-text.js'
+import DemoPlayer from '../demo-player.js'
+import {
+  songLeadInDuration,
+  waitForResultReveal,
+} from '../song-transition.js'
 
 export default class SongController {
   constructor (game) {
     this.game = game
     this.in_screen = false
 
-    this.automode = null
+    this.demo_player = null
     this.auto_paused = false
 
     this.vis_bins = new Uint8Array(game.sound.analyser.frequencyBinCount)
@@ -20,6 +25,19 @@ export default class SongController {
   async run () {
     this.game.song_screen.show()
     this.game.song_screen.setTypingRuby(false)
+    this.game.song_screen.setKeyEffectsEnabled(
+      this.game.preferences.keyEffectsEnabled,
+    )
+    this.game.song_screen.beginKeyEffects(
+      ['normal', 'easy', 'tempo', 'auto'].includes(this.game.game_mode)
+        ? this.game.typing.lines.map((line, id) => ({
+            id,
+            text: line.getRemainingText(),
+            startTime: line.start_time,
+            endTime: line.end_time,
+          }))
+        : [],
+    )
     this.game.background_screen.showSongUI(true)
     this.game.score.setToSongScreen(this.game.song_screen)
 
@@ -27,10 +45,6 @@ export default class SongController {
     this.typing_dom = null
     this.current_line = null
     this.current_typing = -1
-
-    // Start the main loop
-    this.in_screen = true
-    this.animationFrame()
 
     // Set up split progressbar
     if (this.game.game_mode !== 'blank') {
@@ -43,6 +57,19 @@ export default class SongController {
     } else {
       this.game.song_screen.ui_progress_all.chapter([1])
     }
+
+    const firstPlayableLine = this.game.typing.lines.find(
+      line => line.getCharacterCount() > 0,
+    )
+    await this.game.song_screen.playLeadIn(
+      songLeadInDuration(firstPlayableLine?.start_time),
+      { reducedMotion: this.game.preferences.reducedMotion },
+    )
+
+    // Media time remains at zero during the lead-in, so lyric timing,
+    // predictive Keyfall targets, scoring, and CPM retain one shared clock.
+    this.in_screen = true
+    this.animationFrame()
 
     // Play media
     this.game.media.play()
@@ -57,42 +84,62 @@ export default class SongController {
       this.signal_end = resolve
     })
 
-    // Set up automode
+    // Set up the human-paced perfect demonstration.
     if (this.game.game_mode === 'auto') {
-      const song_cpm = this.game.songs.current_song.max_cpm
-      const interval = 60 / song_cpm
-      this.automode = new AutoMode(this.game.typing, this, interval * 0.8)
-      this.automode.run()
+      this.demo_player = new DemoPlayer(this.game.typing, this)
     }
 
+    let naturalEnd = false
     while (true) {
       const keyEvent = await Promise.any([this.game.input.waitForAnyKey(), this.ended_signal])
 
       // End signal received
       if (keyEvent === true) {
+        naturalEnd = true
         break
       }
 
-      // Also exit if Esc is pressed
-      if (keyEvent.key === 'Escape') {
+      // Either familiar back key exits immediately.
+      if (
+        keyEvent.key === 'Escape' ||
+        keyEvent.key === 'Backspace'
+      ) {
         break
+      }
+
+      // A demonstration is deterministic and perfect. Player keystrokes do
+      // not compete with its synthetic input; both back keys remain available.
+      if (this.game.game_mode === 'auto') {
+        continue
       }
 
       // Skip line
       if (keyEvent.key === 'Tab') {
         const line = this.game.typing.getCurrentLine()
         if (line) {
+          this.game.song_screen.finishKeyEffectLine(
+            this.game.typing.current_line,
+            this.game.media.getCurrentTime(),
+            !line.isCompleted(),
+          )
           this.game.media.skipTo(line.end_time - 0.2)
         }
         continue
       }
 
       // If it is typing key
-      if (keyEvent.key.length === 1 && this.current_line && !this.current_line.isCompleted()) {
+      if (
+        /^[a-z]$/i.test(keyEvent.key) &&
+        this.current_line &&
+        !this.current_line.isCompleted()
+      ) {
         const key = keyEvent.key
         if (this.game.game_mode === 'tempo') {
           if (this.current_line && !this.current_line.isCompleted()) {
-            this.type(this.current_line.getRemainingText().substr(0, 1).replace('_', ' '))
+            const target = nextPlayableTypingKey(
+              this.current_line.getRemainingText(),
+            )
+            if (target) this.type(target, { displayKey: key })
           }
         } else {
           this.type(key)
@@ -100,7 +147,12 @@ export default class SongController {
       }
     }
 
+    // Let the final lyric, sound, and key feedback settle before replacing
+    // the playfield. Explicit abandonment remains immediate.
+    await waitForResultReveal(naturalEnd)
+
     this.game.song_screen.hide()
+    this.game.song_screen.endKeyEffects()
     this.game.background_screen.showSongUI(false)
     this.in_screen = false
 
@@ -108,30 +160,55 @@ export default class SongController {
       this.game.background_screen.showSongBackground()
     }
 
-    if (this.automode) {
-      this.automode.stop()
+    if (this.demo_player) {
+      this.demo_player.stop()
+      this.demo_player = null
     }
+    this.game.score.finish(this.game.media.getCurrentTime())
 
     return this.game.result_controller
   }
 
-  type(key) {
+  type (key, {
+    displayKey = key,
+    showFeedback = true,
+  } = {}) {
     // Try to process input key
+    const lineId = this.game.typing.current_line
     const accept = this.current_line.accept(key)
 
-    this.game.score.onType(this.game.media.getCurrentTime(), accept)
+    const currentTime = this.game.media.getCurrentTime()
+    this.game.score.onType(currentTime, accept)
+    let keyFeedback = null
+    if (showFeedback) {
+      keyFeedback = this.game.song_screen.showKeyFeedback(
+        displayKey,
+        accept >= 0,
+        {
+          lineId,
+          remainingText: this.current_line.getRemainingText(),
+          currentTime,
+        },
+      )
+    }
     this.updateTypingLine()
 
     // Play sfx
     if (accept < 0) {
       this.game.sfx.play('error')
     } else {
-      this.game.sfx.play('key')
+      this.game.sfx.play('key', { volume: 0.36 })
+      if (
+        Number(keyFeedback?.streak || 0) >= 25 &&
+        keyFeedback.streak % 25 === 0
+      ) {
+        this.game.sfx.play('ready', { volume: 0.18 })
+      }
     }
 
     // If line is completed
     if (this.current_line.isCompleted()) {
-      this.game.score.onLineEnd(0)
+      this.game.score.onLineEnd(0, currentTime)
       this.triggerTypingChange()
     }
   }
@@ -189,6 +266,7 @@ export default class SongController {
     if (this.in_screen) {
       const current_time = this.game.media.getCurrentTime()
       const duration = this.game.media.getDuration()
+      this.game.song_screen.updateKeyEffects(current_time)
 
       // Update song playback info on screen
       this.game.song_screen.ui_time.text(`${format_time(current_time)} / ${format_time(duration)}`)
@@ -205,17 +283,26 @@ export default class SongController {
       }
 
       // Update typing system
+      if (this.demo_player) {
+        this.demo_player.update(current_time)
+      }
       if (this.game.game_mode === 'easy' && current_line && current_time > current_line.end_time && !current_line.isCompleted()) {
         // In easy mode, wait for the line to complete before advancing
         const left_percent =  (1 - (current_line.getLeftoverCharCount() / current_line.getCharacterCount()))
         this.game.media.skipTo(current_line.start_time + left_percent * (current_line.end_time - current_line.start_time))
       } else {
+        const previousLine = this.game.typing.current_line
         const [changed, leftover] = this.game.typing.update(current_time)
         if (changed) {
+          this.game.song_screen.finishKeyEffectLine(
+            previousLine,
+            current_time,
+            leftover > 0,
+          )
           // Typing line has changed
           if (leftover > 0) {
             // The line isn't completed, update the score
-            this.game.score.onLineEnd(leftover)
+            this.game.score.onLineEnd(leftover, current_time)
             // Play skip sfx when line is skipped
             this.game.sfx.play('skip')
           }

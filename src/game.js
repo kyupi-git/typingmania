@@ -1,5 +1,5 @@
-import TypingMania from './game/typingmania.js'
+import TypingManiaNovel from './game/typingmania-novel.js'
 
 export default function game (config) {
-  new TypingMania(config).run()
+  new TypingManiaNovel(config).run()
 }

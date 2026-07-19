@@ -45,9 +45,11 @@ export default class YouTubeMedia extends Media {
   }
 
   destroy () {
-    this.player.destroy()
+    this.player?.destroy?.()
     this.player = null
-    this._parent.removeChild(this.el)
+    if (this.el?.parentNode === this._parent) {
+      this._parent.removeChild(this.el)
+    }
     this.destroyed = true
     this.ended = true
   }

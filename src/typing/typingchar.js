@@ -1,5 +1,33 @@
 import Observable from '../lib/observable.js'
 
+export function lettersOnlyTyping (value) {
+  return String(value ?? '')
+    .normalize('NFKD')
+    .replace(/\p{Mark}/gu, '')
+    .toLocaleLowerCase()
+    .replace(/[^a-z]/g, '')
+}
+
+export function voiceJapaneseRomanization (value) {
+  const typing = String(value ?? '')
+  const voicedPrefixes = [
+    ['shi', 'ji'],
+    ['chi', 'ji'],
+    ['tsu', 'zu'],
+    ['sh', 'j'],
+    ['ch', 'j'],
+    ['ts', 'z'],
+    ['k', 'g'],
+    ['s', 'z'],
+    ['t', 'd'],
+    ['h', 'b'],
+    ['f', 'b'],
+    ['u', 'vu'],
+  ]
+  const match = voicedPrefixes.find(([prefix]) => typing.startsWith(prefix))
+  return match ? `${match[1]}${typing.slice(match[0].length)}` : typing
+}
+
 export default class TypingChar extends Observable {
   constructor (base, typings, previous = null) {
     super()
@@ -25,40 +53,40 @@ export default class TypingChar extends Observable {
   }
 
   initialize () {
-    for (let i = 0; i < this.typings.length; i++) {
-      if (this.typings[i].length === 0) {
-        this.completed = true
-        this.is_blank = true
-      }
-
-      if (this.typings[i] === ':SMALL_TSU') {
-        this.typings.splice(i, 1)
+    const expanded = []
+    for (const typing of this.typings) {
+      if (typing === ':SMALL_TSU') {
         if (this.next !== null) {
-          for (const typing of this.next.typings) {
-            if (typing.length > 0) {
-              this.typings.splice(i, 0, typing.charAt(0))
-              i++
+          for (const nextTyping of this.next.typings) {
+            if (nextTyping.length > 0) {
+              expanded.push(nextTyping.charAt(0))
             }
           }
         }
-      }
-      if (this.typings[i] === ':RUBY_REPEAT') {
-        this.typings.splice(i, 1)
+      } else if (typing === ':RUBY_REPEAT') {
         if (this.previous !== null) {
-          this.typings = this.previous.typings
-          break
+          expanded.push(...this.previous.typings)
         }
-      }
-      if (this.typings[i] === ':RUBY_REPEAT_DAKUTEN') {
-        this.typings.splice(i, 1)
+      } else if (typing === ':RUBY_REPEAT_DAKUTEN') {
         if (this.previous !== null) {
-          // TODO actually make it dakuten
-          this.typings = this.previous.typings
-          break
+          expanded.push(
+            ...this.previous.typings.map(voiceJapaneseRomanization),
+          )
         }
+      } else {
+        expanded.push(typing)
       }
+    }
 
-      this.typings[i] = this.typings[i].toLowerCase()
+    // Lyrics retain their original spaces, punctuation, symbols, and digits,
+    // but gameplay only targets physical A-Z letter keys. Filtering here
+    // keeps scoring, CPM, demo play, and Keyfall on the same definition.
+    const normalized = [...new Set(expanded.map(lettersOnlyTyping))]
+    const playable = normalized.filter(Boolean)
+    this.typings = playable.length ? playable : ['']
+    if (!playable.length) {
+      this.completed = true
+      this.is_blank = true
     }
 
     this.base_point = this.typings[0].length

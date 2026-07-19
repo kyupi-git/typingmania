@@ -1,20 +1,41 @@
 {
-  "name": "typingmania-neo",
-  "repository": "https://github.com/innocenat/typingmania",
-  "description": "TypingMania NEO is a typing game. It is a spiritual successor to TypingMania Odyssey by SightSeeker Studio.",
-  "author": "innosu",
+  "name": "typingmanianovel",
+  "repository": "https://github.com/kyupi-git/typingmania",
+  "description": "TypingManiaNovel is a multilingual song-lyrics typing game forked from TypingMania NEO.",
   "license": "Apache-2.0",
-  "version": "1.1.1",
+  "version": "20260719.0.0",
   "type": "module",
   "devDependencies": {
-    "esbuild": "^0.9.0",
-    "jest": "^26.6.3"
+    "esbuild": "0.28.1",
+    "htm": "3.1.1",
+    "jest": "30.4.2",
+    "jest-environment-jsdom": "30.4.1",
+    "preact": "10.29.7"
   },
   "scripts": {
-    "test": "jest",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
+    "start-local": "node scripts/local-server.js",
+    "refresh-qqmusic-covers": "node scripts/refresh-qqmusic-covers.js",
+    "refresh-qqmusic-posters": "node scripts/refresh-qqmusic-posters.js",
+    "refresh-qqmusic-artists": "node scripts/refresh-qqmusic-artists.js",
+    "verify-runtime": "node scripts/verify-offline-runtime.js",
+    "build-demo": "node scripts/build-offline-demo.js",
+    "audit-library": "node scripts/audit-song-library.js",
+    "smoke-browser": "node scripts/smoke-test-browser.js",
     "build-game": "node scripts/build-game.js",
     "build-assets": "node scripts/build-assets.js",
     "build-index": "node scripts/build-index.js",
-    "build-song": "node scripts/build-song.js"
+    "build-song": "node scripts/build-song.js",
+    "audit-public": "node scripts/audit-public-tree.js",
+    "check": "npm test && npm run build-game && npm run audit-library && npm run verify-runtime && npm run audit-public"
+  },
+  "dependencies": {
+    "@clamber_l/crypto": "0.1.12",
+    "music-metadata": "11.14.0",
+    "pinyin-pro": "3.28.1"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "transform": {}
   }
 }

@@ -70,17 +70,17 @@ describe('Line tokenizer', () => {
 describe('Line must accept correctly', () => {
   test('Test 1', () => {
     const line = new TypingLine('漢字[かんじ]|ある　なのに　ABC DEF', 0, 0, romanizer)
-    expect(line.getRemainingText()).toBe('KANJI\xA0\xA0ARU\xA0\xA0NANONI\xA0\xA0ABC_DEF')
+    expect(line.getRemainingText()).toBe('KANJI\xA0\xA0ARU\xA0\xA0NANONI\xA0\xA0ABCDEF')
     expect(line.accept('k')).toBe(1)
     expect(line.accept('a')).toBe(1)
     expect(line.accept('n')).toBe(1)
-    expect(line.getRemainingText()).toBe('JI\xA0\xA0ARU\xA0\xA0NANONI\xA0\xA0ABC_DEF')
+    expect(line.getRemainingText()).toBe('JI\xA0\xA0ARU\xA0\xA0NANONI\xA0\xA0ABCDEF')
     expect(line.accept('n')).toBe(0)
-    expect(line.getRemainingText()).toBe('JI\xA0\xA0ARU\xA0\xA0NANONI\xA0\xA0ABC_DEF')
+    expect(line.getRemainingText()).toBe('JI\xA0\xA0ARU\xA0\xA0NANONI\xA0\xA0ABCDEF')
     expect(line.accept('j')).toBe(1)
-    expect(line.getRemainingText()).toBe('I\xA0\xA0ARU\xA0\xA0NANONI\xA0\xA0ABC_DEF')
+    expect(line.getRemainingText()).toBe('I\xA0\xA0ARU\xA0\xA0NANONI\xA0\xA0ABCDEF')
     expect(line.accept('i')).toBe(1)
-    expect(line.getRemainingText()).toBe('ARU\xA0\xA0NANONI\xA0\xA0ABC_DEF')
+    expect(line.getRemainingText()).toBe('ARU\xA0\xA0NANONI\xA0\xA0ABCDEF')
     expect(line.accept('i')).toBe(-1)
     expect(line.accept('a')).toBe(1)
     expect(line.accept('r')).toBe(1)
@@ -91,15 +91,10 @@ describe('Line must accept correctly', () => {
     expect(line.accept('o')).toBe(1)
     expect(line.accept('n')).toBe(1)
     expect(line.accept('i')).toBe(1)
-    expect(line.getRemainingText()).toBe('ABC_DEF')
+    expect(line.getRemainingText()).toBe('ABCDEF')
     expect(line.accept('a')).toBe(1)
     expect(line.accept('b')).toBe(1)
     expect(line.accept('c')).toBe(1)
-    expect(line.getRemainingText()).toBe('_DEF')
-    expect(line.accept('d')).toBe(-1)
-    expect(line.getRemainingText()).toBe('_DEF')
-    expect(line.accept(' ')).toBe(1)
-    expect(line.getRemainingText()).toBe('DEF')
     expect(line.accept('d')).toBe(1)
     expect(line.accept('e')).toBe(1)
     expect(line.accept('f')).toBe(1)
@@ -109,5 +104,16 @@ describe('Line must accept correctly', () => {
 
   test('Test 2', () => {
     const line = new TypingLine('漆黒[しっこく]のこの世界[せかい]に', 0, 0, romanizer)
+  })
+
+  test('spaces, punctuation, symbols, and digits stay visible but are not playable', () => {
+    const line = new TypingLine('Ready, set... GO! 2026', 0, 4, romanizer)
+    expect(line.line).toBe('Ready, set... GO! 2026')
+    expect(line.getRemainingText()).toBe('READYSETGO')
+    expect(line.getCharacterCount()).toBe(10)
+    for (const key of 'readysetgo') {
+      expect(line.accept(key)).toBeGreaterThanOrEqual(0)
+    }
+    expect(line.isCompleted()).toBe(true)
   })
 })

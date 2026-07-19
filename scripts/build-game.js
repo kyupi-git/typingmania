@@ -9,6 +9,7 @@
 import fs from 'fs'
 import esbuild from 'esbuild'
 import { fileURLToPath } from 'url'
+import { APP_TITLE } from '../src/app-meta.js'
 
 const DIST_PATH = fileURLToPath(new URL('../dist', import.meta.url))
 const SRC_PATH = fileURLToPath(new URL('../src', import.meta.url))
@@ -28,7 +29,7 @@ esbuild.buildSync({
 fs.writeFileSync(DIST_PATH + '/index.html', `
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name=viewport content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1"><title>TypingMania NEO</title></head>
+<head><meta charset="UTF-8"><meta name=viewport content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1"><title>${APP_TITLE}</title></head>
 <body>
 <script type="module">
   import game from './game.js'
@@ -40,7 +41,7 @@ fs.writeFileSync(DIST_PATH + '/index.html', `
 </script>
 <noscript>
     <p>
-        TypingMania NEO is a song lyrics typing game. It is a spiritual successor to SightSeekerStudio's TypingMania Odyssey.
+        TypingManiaNovel is a multilingual song-lyrics typing game forked from TypingMania NEO.
         Check <a href="https://github.com/innocenat/typingmania" rel="noopener">GitHub repository</a> for more information.
     </p>
     <p>
