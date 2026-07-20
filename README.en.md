@@ -14,23 +14,31 @@ cache importer for Windows.
 > automatically decrypt cached audio, validate lyrics and pronunciation, find
 > suitable artwork, and turn songs into playable tracks.
 
+## Preview
+
+![Song selection, sorting, and an imported library](./screenshot1.gif)
+
+| Japanese gameplay | English gameplay |
+| :---: | :---: |
+| ![Japanese-song gameplay](./screenshot2.gif) | ![English-song gameplay](./screenshot3.gif) |
+
 Download
 [`TypingManiaNovel-20260719-Windows-x64.zip`](https://github.com/kyupi-git/typingmania/releases/download/v20260719/TypingManiaNovel-20260719-Windows-x64.zip)
 from Releases, extract it, and double-click `start-game.cmd`. The archive
-includes the runtime and three starter songs, so Node.js and npm are not
-required.
-
-The repository contains three original starter songs in Chinese, English, and
-Japanese. It contains no QQ Music cache, imported media, account session,
-listening history, or other personal library data.
+includes the runtime, so Node.js and npm are not required. For copyright
+reasons, the default library contains only one Chinese, one English, and one
+Japanese starter song.
 
 ## Quick start
 
-### Windows 11 x64
+### Windows x64
 
 1. Download or clone the complete repository.
 2. Double-click `start-game.cmd`.
 3. Play in Edge or another modern browser.
+
+The installation-free launcher currently supports Windows x64 only. Other
+platforms can still run the project with Node.js as described below.
 
 No Node.js or npm installation is required. The launcher verifies and extracts
 the bundled Node.js runtime on first use, starts one localhost service for this
@@ -63,16 +71,16 @@ as the TypingMania NEO baseline.
 | Area | TypingMania NEO fork baseline | TypingManiaNovel |
 | --- | --- | --- |
 | Identity | TypingMania NEO 1.1.1 | TypingManiaNovel |
-| Launch | Run from a web server or hosted site | One-click Windows launcher with bundled runtime, service reuse, and scoped termination; static hosting remains supported |
+| Launch | Start a web server manually or deploy the game to a site | Bundled Windows runtime and one-click `start-game.cmd`, with no deployment required; reuses one scoped local service and can stop it safely, while static hosting remains supported |
 | Interface | Primarily English; keyboard-only menus | Browser-language detection, Chinese/English/Japanese UI, language picker, mouse selection, and wheel navigation |
 | Song library | Static index, URL selection, and drag-and-drop `.typingmania` files | Startup scan, deduplication, nested collections, artwork previews, and sorting by added time, required keys/min, title, or artist in either direction |
 | Import | User-prepared song packages | Optional QQ Music cache import in successive 20-song batches, with session detection, decryption, validation, and deduplication |
 | Lyrics | Manual preparation, including Japanese Kanji readings | Language-specific metadata filtering for Chinese, English, and Japanese; automated Chinese pinyin and song-specific timed Japanese Roma during QQ import |
-| Required input | Some spaces and converted punctuation can be typeable | Lyrics keep their displayed spaces and punctuation, but gameplay requires letter keys only |
-| Japanese typing | Kana/romaji table with alternate sequences | Preserves the alternate-sequence model and extends it with normalized, separator-free imported readings |
+| Required input | Some spaces and converted punctuation can be typeable | Spaces between English words and punctuation in every language remain visible but are no longer meaningless input targets; gameplay requires letter keys only |
+| Japanese typing | Kunrei-style forms lead the kana/romaji order, with alternate sequences accepted | Hepburn-style spellings such as `shi`, `chi`, and `tsu` are preferred to match this fork's typing style; the extra letters can raise the difficulty, while accepted alternatives and song-specific imported readings remain supported |
 | Artwork and origin | One package image | Direct-production poster background plus album cover when verified; original production title is shown only when provenance is reliable |
 | Difficulty | 90th-percentile and maximum CPM | Required keys/min as whole-song average and fastest five seconds, using the same timing model as perfect Demo Play and result statistics |
-| Automatic play | Hidden Auto mode can still be affected by player input | Explicit Demo Play performs a deterministic perfect run, keeps its score separate, and demonstrates the required typing pace |
+| Automatic play | Hidden Auto mode can still be affected by player input | Explicit Demo Play types the lyrics automatically at a human-like pace; any song can achieve a one-click perfect full combo, and demo scores are kept separate |
 | Feedback | Typing sound and standard game modes | Predictive Keyfall targets, correct/error/missed states, streak aura, pulse, and milestone sound with bounded effects |
 | Results | Score, rank, combo, accuracy, and line totals | Expanded scorecard, typing-flow chart, rolling pace chart, reference pace, and delayed transition after the final lyric |
 | Library maintenance | No indexed multi-song editor or clean reset | Multi-select deletion with rollback-safe file cleanup and one-click reset to the verified three-song starter library |
@@ -126,8 +134,8 @@ are ordered by fixed added-time metadata:
 2. English — `Letters in the Light`
 3. Japanese — `明日へのリズム`
 
-They use original project audio, lyrics, and SVG artwork, make no network
-requests, and contain no data from a music service.
+Their bundled audio, lyrics, and SVG artwork make no network requests and
+contain no data from a music service.
 
 The local server scans the project for `.typingmania` packages at each start,
 excludes private cache and tool directories, deduplicates entries, and rebuilds
