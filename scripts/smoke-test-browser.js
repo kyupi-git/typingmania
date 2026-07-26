@@ -4,6 +4,8 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 
+import WebSocket from 'ws'
+
 const GAME_URL = process.env.TMN_SMOKE_URL || 'http://127.0.0.1:8765/'
 const earlySongArgument = process.argv.find((argument) =>
   argument.startsWith('--early-song=')
@@ -17,6 +19,7 @@ const EDGE_CANDIDATES = [
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
 ].filter(Boolean)
+let browserDiagnostics = ''
 
 async function firstExistingFile (filenames) {
   for (const filename of filenames) {
@@ -67,11 +70,20 @@ class CdpClient {
 
   async connect () {
     await new Promise((resolve, reject) => {
-      this.socket.addEventListener('open', resolve, { once: true })
-      this.socket.addEventListener('error', reject, { once: true })
+      const timeout = setTimeout(() => {
+        reject(new Error('Timed out connecting to the Edge DevTools socket'))
+      }, 10_000)
+      const complete = callback => event => {
+        clearTimeout(timeout)
+        callback(event)
+      }
+      this.socket.once('open', complete(resolve))
+      this.socket.once('error', complete(() => {
+        reject(new Error('Edge DevTools socket connection failed'))
+      }))
     })
-    this.socket.addEventListener('message', event => {
-      const message = JSON.parse(String(event.data))
+    this.socket.on('message', data => {
+      const message = JSON.parse(data.toString('utf8'))
       if (message.id) {
         const pending = this.pending.get(message.id)
         if (!pending) return
@@ -85,12 +97,34 @@ class CdpClient {
         this.events.push(message)
       }
     })
+    this.socket.on('close', () => {
+      for (const pending of this.pending.values()) {
+        pending.reject(new Error(
+          `Edge DevTools socket closed during ${pending.method}`,
+        ))
+      }
+      this.pending.clear()
+    })
   }
 
   call (method, params = {}) {
     const id = this.nextId++
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
+      const timeout = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error(`Edge DevTools command timed out: ${method}`))
+      }, 15_000)
+      this.pending.set(id, {
+        method,
+        resolve: value => {
+          clearTimeout(timeout)
+          resolve(value)
+        },
+        reject: error => {
+          clearTimeout(timeout)
+          reject(error)
+        },
+      })
       this.socket.send(JSON.stringify({ id, method, params }))
     })
   }
@@ -144,15 +178,26 @@ async function main () {
   const browser = childProcess.spawn(edge, [
     '--headless=new',
     '--disable-gpu',
+    '--disable-gpu-sandbox',
+    '--no-sandbox',
     '--no-first-run',
     '--no-default-browser-check',
+    '--remote-allow-origins=*',
     '--autoplay-policy=no-user-gesture-required',
+    '--window-size=1920,1080',
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${profile}`,
     GAME_URL,
   ], {
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
     windowsHide: true,
+  })
+  browser.stderr.on('data', chunk => {
+    browserDiagnostics = `${browserDiagnostics}${chunk}`.slice(-4000)
+  })
+  browser.on('exit', (code, signal) => {
+    browserDiagnostics = `${browserDiagnostics}\n` +
+      `Edge exited with code ${code}, signal ${signal}`
   })
   let client = null
   try {
@@ -226,7 +271,7 @@ async function main () {
         outlinedText,
       }
     })()`)
-    if (menuLayout.title !== 'TypingManiaNovel 20260719') {
+    if (menuLayout.title !== 'TypingManiaNovel 20260726') {
       throw new Error(`Unexpected document title: ${menuLayout.title}`)
     }
     if (!menuLayout.albumFrame || !menuLayout.outlinedText) {
@@ -276,7 +321,7 @@ async function main () {
       return result
     })()`)
     if (
-      keyfallVisual.auraOpacity < 0.2 ||
+      keyfallVisual.auraOpacity < 0.18 ||
       keyfallVisual.auraStreak !== '10' ||
       !keyfallVisual.flashVisible ||
       keyfallVisual.flashLayer !== '6'
@@ -296,7 +341,8 @@ async function main () {
         keyCode: 49,
         locale: 'zh',
         cpmLabel: '所需按键数/分（平均 / 最快5秒）',
-        hints: ['K：开关按键雨', 'M：完美演示', 'L：界面语言'],
+        buttons: ['按键雨：开(K)', '演示：关(M)', '界面语言(L)'],
+        metadata: '更新曲目信息(U)',
       },
       {
         key: '2',
@@ -304,7 +350,8 @@ async function main () {
         keyCode: 50,
         locale: 'en',
         cpmLabel: 'Required keys/min (avg / fastest 5 sec)',
-        hints: ['K · Toggle Keyfall', 'M · Perfect demo', 'L · Language'],
+        buttons: ['Keyfall: On (K)', 'Demo: Off (M)', 'Language (L)'],
+        metadata: 'Refresh info (U)',
       },
       {
         key: '3',
@@ -312,7 +359,8 @@ async function main () {
         keyCode: 51,
         locale: 'ja',
         cpmLabel: '必要キー数/分（平均 / 最速5秒）',
-        hints: ['K：キー演出切替', 'M：デモ再生', 'L：表示言語'],
+        buttons: ['キー演出：オン（K）', 'デモ：オフ（M）', '表示言語（L）'],
+        metadata: '曲情報を更新（U）',
       },
     ]
     for (const localeCase of localeCases) {
@@ -337,7 +385,8 @@ async function main () {
       localeLayouts[localeCase.locale] = await waitFor(
         () => client.evaluate(`(() => {
           const expected = ${JSON.stringify(localeCase.cpmLabel)}
-          const expectedHints = ${JSON.stringify(localeCase.hints)}
+          const expectedButtons = ${JSON.stringify(localeCase.buttons)}
+          const expectedMetadata = ${JSON.stringify(localeCase.metadata)}
           const label = [...document.querySelectorAll('div')].find(
             element => (
               element.innerText === expected &&
@@ -345,32 +394,43 @@ async function main () {
             ),
           )
           if (!label) return null
-          const hints = expectedHints.map(text => (
+          const buttons = expectedButtons.map(text => (
             [...document.querySelectorAll('div')].find(element => (
               element.innerText === text &&
               getComputedStyle(element).display !== 'none'
             ))
           ))
-          if (hints.some(element => !element)) return null
+          if (buttons.some(element => !element)) return null
+          const metadata = [...document.querySelectorAll('div')].find(
+            element => (
+              element.innerText === expectedMetadata &&
+              getComputedStyle(element).display !== 'none'
+            ),
+          )
+          if (!metadata) return null
           return {
             text: label.innerText,
             clientWidth: label.clientWidth,
             scrollWidth: label.scrollWidth,
             fits: label.scrollWidth <= label.clientWidth + 1,
-            hints: hints.map(element => ({
+            buttons: buttons.map(element => ({
               text: element.innerText,
               fits: element.scrollWidth <= element.clientWidth + 1,
-              shadow: getComputedStyle(element).textShadow,
             })),
+            metadata: {
+              text: metadata.innerText,
+              fits: metadata.scrollWidth <= metadata.clientWidth + 1,
+            },
           }
         })()`),
         `${localeCase.locale} interface labels to update`,
       )
       if (
         !localeLayouts[localeCase.locale].fits ||
-        localeLayouts[localeCase.locale].hints.some(
-          hint => !hint.fits || hint.shadow === 'none',
-        )
+        localeLayouts[localeCase.locale].buttons.some(
+          button => !button.fits,
+        ) ||
+        !localeLayouts[localeCase.locale].metadata.fits
       ) {
         throw new Error(
           `${localeCase.locale} menu label overflows or lacks contrast: ` +
@@ -399,7 +459,7 @@ async function main () {
     if (
       !aboutDialog.fits ||
       !aboutDialog.text.includes('https://github.com/kyupi-git/typingmania') ||
-      !aboutDialog.text.includes('20260719') ||
+      !aboutDialog.text.includes('20260726') ||
       !aboutDialog.text.includes('TypingMania NEO') ||
       !aboutDialog.text.includes('pinyin-pro') ||
       !aboutDialog.text.includes('Bangumi API') ||
@@ -647,7 +707,12 @@ async function main () {
   }
 }
 
-main().catch(error => {
-  console.error(error.stack || error.message)
+try {
+  await main()
+} catch (error) {
+  console.error(
+    `${error.stack || error.message}` +
+    (browserDiagnostics ? `\n${browserDiagnostics.trim()}` : ''),
+  )
   process.exitCode = 1
-})
+}

@@ -7,10 +7,12 @@ import latinTable from '../../latin-table/latin-table.js'
 import { buildSongLyrics } from '../../src/util/song-meta.js'
 import {
   filterLyricLines,
+  isNonVocalTrackMetadata,
   LYRIC_QUALITY_VERSION,
   normalizeLyricComparable,
   reconcileQrcWithOfficial,
 } from './lyrics-quality.js'
+import { normalizeLyricTimingWindows } from './timed-lyrics.js'
 import {
   normalizePronunciation,
   PRONUNCIATION_QUALITY_VERSION,
@@ -32,7 +34,7 @@ function decodeXmlEntities (text) {
     .replace(/&amp;/g, '&')
 }
 
-function extractLyricContent (xml) {
+export function extractLyricContent (xml) {
   const match = xml.match(/\bLyricContent="([\s\S]*?)"\s*\/?\s*>/)
   if (!match) {
     throw new Error('QRC XML does not contain LyricContent')
@@ -159,6 +161,9 @@ export async function convertQrcFiles ({
   metadata = {},
   officialLines = [],
 }) {
+  if (isNonVocalTrackMetadata(metadata)) {
+    throw new Error('The track is marked as instrumental or non-vocal')
+  }
   const mainXml = await decryptQrc(qrcCrypto, mainFile)
   const parsedMainLines = parseTimedQrcLines(extractLyricContent(mainXml))
   if (!parsedMainLines.length) {
@@ -267,6 +272,24 @@ export async function convertQrcFiles ({
   if (typable.length < 5) {
     throw new Error('Lyrics do not contain enough lines with usable pronunciation')
   }
+  const totalKeys = typable.reduce((sum, line) => {
+    try {
+      return sum + new TypingLine(
+        line[2],
+        line[0],
+        line[1],
+        romanizer,
+      ).getCharacterCount()
+    } catch {
+      return sum
+    }
+  }, 0)
+  const distinctLines = new Set(
+    mainLines.map(line => normalizeLyricComparable(line.text)).filter(Boolean),
+  ).size
+  if (totalKeys < 18 || distinctLines < 4) {
+    throw new Error('The track has no substantial vocal lyrics')
+  }
   const unmatchedReadings = romaLines.filter(line => !usedReadings.has(line))
   if (unmatchedReadings.length) {
     qualityIssues.push(`${unmatchedReadings.length} pronunciation line(s) do not match the lyric timeline`)
@@ -276,6 +299,7 @@ export async function convertQrcFiles ({
       `Lyrics failed pronunciation coverage (${qualityIssues.length} issue(s); ${qualityIssues[0]})`,
     )
   }
+  const timing = normalizeLyricTimingWindows(output)
   const paceOptions = {
     durationMs: Math.max(0, Number(metadata.duration) || 0) * 1000,
   }
@@ -317,6 +341,9 @@ export async function convertQrcFiles ({
       generatedPinyinLines,
       songSpecificPronunciationLines,
       pronunciationOverrideLines,
+      timingWindowsAdjusted: timing.adjusted,
+      instrumentalGapMsRemoved: timing.removedGapMs,
+      typicalMsPerKey: timing.typicalMsPerKey,
       maxTimingDeltaMs: deltas.length ? Math.max(...deltas) : null,
       firstStartMs: output[0]?.[0] ?? null,
       lastEndMs: output.at(-1)?.[1] ?? null,

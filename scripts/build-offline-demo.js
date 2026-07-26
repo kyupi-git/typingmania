@@ -22,7 +22,28 @@ function oscillator (frequency, time) {
   return Math.sin(2 * Math.PI * frequency * time) * 0.7 + triangle * 0.3
 }
 
-function makeDemoWave () {
+const DEMO_ARRANGEMENTS = {
+  chinese: {
+    bpm: 88,
+    chords: [[62, 67, 69], [60, 64, 69], [55, 62, 67], [57, 62, 66]],
+    melody: [74, 76, 79, 81, 79, 76, 74, 69, 72, 74, 76, 79, 76, 74, 69, 67],
+    character: 'pentatonic',
+  },
+  english: {
+    bpm: 116,
+    chords: [[55, 59, 62], [50, 54, 57], [52, 55, 59], [48, 52, 55]],
+    melody: [67, 67, 70, 72, 74, 72, 70, 67, 62, 65, 67, 70, 67, 65, 62, 60],
+    character: 'pop-rock',
+  },
+  japanese: {
+    bpm: 152,
+    chords: [[65, 69, 72], [67, 71, 74], [64, 67, 71], [69, 72, 76]],
+    melody: [76, 79, 81, 83, 81, 79, 76, 74, 76, 78, 79, 83, 81, 79, 78, 76],
+    character: 'j-pop',
+  },
+}
+
+function makeDemoWave (demo) {
   const sampleCount = sampleRate * duration
   const dataSize = sampleCount * 2
   const wave = Buffer.alloc(44 + dataSize)
@@ -40,32 +61,59 @@ function makeDemoWave () {
   wave.write('data', 36, 'ascii')
   wave.writeUInt32LE(dataSize, 40)
 
-  const chords = [
-    [60, 64, 67],
-    [57, 60, 64],
-    [53, 57, 60],
-    [55, 59, 62],
-  ]
-  const melody = [
-    72, 74, 76, 79, 76, 74, 72, 67,
-    69, 72, 76, 72, 69, 67, 64, 67,
-  ]
+  const arrangement = DEMO_ARRANGEMENTS[demo.style]
+  const beatLength = 60 / arrangement.bpm
 
   for (let index = 0; index < sampleCount; index++) {
     const time = index / sampleRate
-    const chord = chords[Math.floor(time / 4) % chords.length]
-    const melodyNote = melody[Math.floor(time * 2) % melody.length]
-    const notePhase = (time * 2) % 1
-    const noteEnvelope = Math.min(1, notePhase * 12) * Math.exp(-notePhase * 2.8)
-    const beatPhase = time % 1
+    const beat = time / beatLength
+    const chord = arrangement.chords[
+      Math.floor(beat / 4) % arrangement.chords.length
+    ]
+    const melodyRate = arrangement.character === 'j-pop' ? 2 : 1
+    const melodyNote = arrangement.melody[
+      Math.floor(beat * melodyRate) % arrangement.melody.length
+    ]
+    const notePhase = (beat * melodyRate) % 1
+    const noteEnvelope = Math.min(1, notePhase * 15) *
+      Math.exp(-notePhase * (
+        arrangement.character === 'pentatonic' ? 4.2 : 2.9
+      ))
+    const beatPhase = beat % 1
     const kick = Math.sin(2 * Math.PI * (75 - beatPhase * 35) * beatPhase) *
       Math.exp(-beatPhase * 12)
     const chordSignal = chord.reduce((sum, note) => (
       sum + oscillator(midiFrequency(note), time)
     ), 0) / chord.length
-    const melodySignal = oscillator(midiFrequency(melodyNote), time) * noteEnvelope
+    const melodyFrequency = midiFrequency(melodyNote)
+    const melodySignal = (
+      oscillator(melodyFrequency, time) * (
+        arrangement.character === 'pentatonic' ? 0.78 : 1
+      ) +
+      Math.sin(2 * Math.PI * melodyFrequency * 2 * time) * (
+        arrangement.character === 'pentatonic' ? 0.22 : 0.08
+      )
+    ) * noteEnvelope
+    const backbeat = (
+      arrangement.character === 'pop-rock' &&
+      Math.floor(beat) % 2 === 1
+    )
+      ? (Math.sin(index * 12.9898) * 0.06) *
+        Math.exp(-beatPhase * 18)
+      : 0
+    const pulseBass = Math.sin(
+      2 * Math.PI * midiFrequency(chord[0] - 12) * time,
+    ) * Math.exp(-beatPhase * (
+      arrangement.character === 'j-pop' ? 5 : 8
+    ))
     const edgeFade = Math.min(1, time / 0.5, (duration - time) / 1.2)
-    const sample = (chordSignal * 0.18 + melodySignal * 0.16 + kick * 0.08) *
+    const sample = (
+      chordSignal * (arrangement.character === 'pentatonic' ? 0.13 : 0.17) +
+      melodySignal * (arrangement.character === 'j-pop' ? 0.17 : 0.16) +
+      kick * (arrangement.character === 'pop-rock' ? 0.11 : 0.065) +
+      pulseBass * 0.06 +
+      backbeat
+    ) *
       Math.max(0, edgeFade)
     wave.writeInt16LE(
       Math.max(-32768, Math.min(32767, Math.round(sample * 32767))),
@@ -95,6 +143,7 @@ const DEMOS = [
     subtitle: 'English lyric validation',
     addedAt: '2026-07-18T00:00:00.000Z',
     language: 'EN',
+    style: 'english',
     label: 'ENGLISH',
     colors: ['#10253f', '#2a80a5', '#72e8ff'],
     credits: ['Lyrics by: TypingManiaNovel', 'Composed by: TypingManiaNovel'],
@@ -113,6 +162,7 @@ const DEMOS = [
     subtitle: '日本語歌詞・ローマ字検証',
     addedAt: '2026-07-19T00:00:00.000Z',
     language: 'JA',
+    style: 'japanese',
     label: '日本語',
     colors: ['#321a3d', '#a94277', '#ffb7dc'],
     credits: ['作詞・作曲：TypingManiaNovel', '編曲：TypingManiaNovel'],
@@ -131,6 +181,7 @@ const DEMOS = [
     subtitle: '中文歌词与拼音验证',
     addedAt: '2026-07-17T00:00:00.000Z',
     language: 'ZH',
+    style: 'chinese',
     label: '中文',
     colors: ['#3f1e16', '#bb563d', '#ffd27a'],
     credits: ['作词：TypingManiaNovel', '制作人：TypingManiaNovel'],
@@ -212,7 +263,7 @@ function makeCover (demo) {
   </g>
   <text x="400" y="145" fill="#fff" font-family="Segoe UI, sans-serif"
         font-size="54" font-weight="700" text-anchor="middle">${demo.title}</text>
-  <text x="400" y="550" fill="#fff" opacity=".9" font-family="Segoe UI, sans-serif"
+  <text x="400" y="530" fill="#fff" opacity=".9" font-family="Segoe UI, sans-serif"
         font-size="34" letter-spacing="6" text-anchor="middle">${demo.label}</text>
 </svg>`.trim()
 }
@@ -269,10 +320,9 @@ export async function buildStarterLibrary (projectRoot = defaultRoot) {
   const root = path.resolve(projectRoot)
   const outputDirectory = path.join(root, 'songs')
   await fs.mkdir(outputDirectory, { recursive: true })
-  const wave = makeDemoWave()
   const filenames = []
   for (const demo of DEMOS) {
-    filenames.push(await buildDemo(root, demo, wave))
+    filenames.push(await buildDemo(root, demo, makeDemoWave(demo)))
   }
   await fs.rm(path.join(outputDirectory, 'offline-demo.typingmania'), {
     force: true,

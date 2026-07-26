@@ -50,6 +50,7 @@ export default class TypingManiaNovel {
     this.typing = null
     this.score = null
     this.media = null
+    this.music_video = null
 
     this.background_screen = new BackgroundScreen(this.viewport, this.i18n)
     this.songinfo_screen = new SongInfoScreen(this.viewport, this.i18n)
@@ -59,6 +60,9 @@ export default class TypingManiaNovel {
     this.result_screen = new ResultScreen(this.viewport, this.i18n)
     this.menu_screen.setKeyEffectsEnabled(
       this.preferences.keyEffectsEnabled,
+    )
+    this.menu_screen.setMusicVideoEnabled(
+      this.preferences.musicVideoEnabled,
     )
     this.song_screen.setKeyEffectsEnabled(
       this.preferences.keyEffectsEnabled,
@@ -119,9 +123,11 @@ export default class TypingManiaNovel {
       this.media.pause()
       this.media.destroy()
     }
+    this.music_video?.destroy()
     this.typing = null
     this.score = null
     this.media = null
+    this.music_video = null
   }
 
   // Main game/input loop

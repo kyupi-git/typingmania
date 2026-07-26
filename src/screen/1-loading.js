@@ -10,7 +10,11 @@ export default class LoadingScreen extends Screen {
     this.current_mode = 'normal'
     this.create(100, [
       this.main_text = Txt(0, 420, 1920, 120).color(White).font(UIFont.size(96)).align(CENTER),
-      this.sub_text = Txt(0, 580, 1920, 60).color(White).font(UIFont.size(48)).align(CENTER),
+      this.sub_text = Txt(160, 565, 1600, 300)
+        .color(White)
+        .font(UIFont.size(42).line(52))
+        .align(CENTER)
+        .wrap(),
 
       // Game mode banner
       this.game_mode_banner = Txt(0, 0, 1920, 45).font(UIFont.size(30)).align(CENTER).color(White)
@@ -22,7 +26,16 @@ export default class LoadingScreen extends Screen {
   }
 
   setSubText (txt) {
-    this.sub_text.text(txt)
+    const value = String(txt || '')
+    const lines = value.split('\n').length
+    const fontSize = lines >= 6 || value.length > 360
+      ? 24
+      : lines >= 4 || value.length > 220
+        ? 30
+        : 42
+    this.sub_text.font(UIFont.size(fontSize).line(Math.round(fontSize * 1.28)))
+    this.sub_text.el.style.whiteSpace = 'pre-line'
+    this.sub_text.text(value)
   }
 
   updateGameMode(mode) {

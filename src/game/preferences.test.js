@@ -2,6 +2,7 @@ import { test } from '@jest/globals'
 
 import GamePreferences, {
   KEY_EFFECTS_STORAGE_KEY,
+  MUSIC_VIDEO_STORAGE_KEY,
   SONG_SORT_DIRECTION_STORAGE_KEY,
   SONG_SORT_MODE_STORAGE_KEY,
 } from './preferences.js'
@@ -67,4 +68,13 @@ test('song sorting defaults, validates, and persists', () => {
   preferences.setSongSort('unsupported', 'sideways')
   expect(preferences.songSortMode).toBe('added')
   expect(preferences.songSortDirection).toBe('asc')
+})
+
+test('music video playback is explicitly opt-in and persisted', () => {
+  const storage = memoryStorage()
+  const preferences = new GamePreferences({ storage })
+  expect(preferences.musicVideoEnabled).toBe(false)
+  expect(preferences.toggleMusicVideo()).toBe(true)
+  expect(storage.getItem(MUSIC_VIDEO_STORAGE_KEY)).toBe('true')
+  expect(new GamePreferences({ storage }).musicVideoEnabled).toBe(true)
 })

@@ -10,12 +10,16 @@ export default class SongCollection {
       this.name = ':root:'
       this.description = ''
       this.translations = {}
+      this.preview_image_url = ''
+      this.preview_image_is_poster = false
 
       contents = options
     } else {
       this.name = options.name
       this.description = options.description
       this.translations = options.translations || {}
+      this.preview_image_url = options.preview_image_url || ''
+      this.preview_image_is_poster = Boolean(options.preview_image_is_poster)
 
       contents = options.contents
     }

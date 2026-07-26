@@ -6,7 +6,8 @@ import { TextDecoder, TextEncoder } from 'util'
 import { test } from '@jest/globals'
 
 import PackedFile from '../../src/lib/packedfile.js'
-import { refreshQQMusicLyricsAndPace } from './lyrics-maintenance.js'
+import { LYRIC_QUALITY_VERSION } from './lyrics-quality.js'
+import { refreshImportedLyricsAndPace } from './lyrics-maintenance.js'
 
 globalThis.TextEncoder = TextEncoder
 globalThis.TextDecoder = TextDecoder
@@ -54,7 +55,7 @@ test('maintenance removes Blue-style credits and recalculates reference pace', a
   }
 
   try {
-    const result = await refreshQQMusicLyricsAndPace({ root })
+    const result = await refreshImportedLyricsAndPace({ root })
     expect(result).toMatchObject({
       refreshed: 1,
       removed: 2,
@@ -71,7 +72,7 @@ test('maintenance removes Blue-style credits and recalculates reference pace', a
     expect(lyrics).toContain('Written in the stars above')
     expect(song.cpm).not.toBe(1207)
     expect(song.source.quality).toMatchObject({
-      version: 5,
+      version: LYRIC_QUALITY_VERSION,
       removed_metadata_lines: 2,
     })
     expect(song.source.pace).toMatchObject({

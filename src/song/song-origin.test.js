@@ -24,6 +24,14 @@ test('localizes episode qualifiers and insert songs', () => {
     .toBe('TVアニメ『某作品』第13話挿入歌')
 })
 
+test('a generic animation character-song label still identifies anime media', () => {
+  expect(parseSongOrigin('《草莓棉花糖》动画角色曲')).toMatchObject({
+    workTitle: '草莓棉花糖',
+    media: 'tv',
+    role: 'character',
+  })
+})
+
 test('localizes film themes and Japanese origins in either direction', () => {
   expect(localizeSongOrigin('《示例电影》剧场版主题曲', 'en'))
     .toBe('Theme song for the anime film “示例电影”')
@@ -31,6 +39,46 @@ test('localizes film themes and Japanese origins in either direction', () => {
     .toBe('TV动画《サンプル作品》片尾曲')
   expect(localizeSongOrigin('劇場版アニメ『サンプル映画』主題歌', 'en'))
     .toBe('Theme song for the anime film “サンプル映画”')
+})
+
+test('distinguishes live-action television and film credits from animation', () => {
+  expect(parseSongOrigin('电视剧《示例剧集》片头曲')).toMatchObject({
+    workTitle: '示例剧集',
+    media: 'television',
+    role: 'opening',
+  })
+  expect(localizeSongOrigin('电视剧《示例剧集》片头曲', 'en'))
+    .toBe('Opening theme for the TV series “示例剧集”')
+  expect(localizeSongOrigin('电影《示例影片》主题曲', 'ja'))
+    .toBe('映画『示例影片』主題歌')
+})
+
+test('localizes visual-novel, JRPG, and game credits as their direct media', () => {
+  expect(localizeSongOrigin('视觉小说《サンプルノベル》主题曲', 'ja'))
+    .toBe('ビジュアルノベル『サンプルノベル』主題歌')
+  expect(localizeSongOrigin('JRPG《サンプルクエスト》主题曲', 'en'))
+    .toBe('Theme song for the JRPG “サンプルクエスト”')
+  expect(localizeSongOrigin('游戏《サンプルゲーム》片尾曲', 'zh'))
+    .toBe('游戏《サンプルゲーム》片尾曲')
+})
+
+test('localizes documentary, commercial, variety, and sports productions', () => {
+  expect(localizeSongOrigin(
+    '纪录片《Planet Earth》片尾曲',
+    'en',
+  )).toBe('Ending theme for the documentary “Planet Earth”')
+  expect(localizeSongOrigin(
+    'CM『未来キャンペーン』テーマソング',
+    'zh',
+  )).toBe('广告片《未来キャンペーン》主题曲')
+  expect(localizeSongOrigin(
+    '综艺节目《青春舞台》主题曲',
+    'ja',
+  )).toBe('バラエティ番組『青春舞台』主題歌')
+  expect(localizeSongOrigin(
+    '体育赛事《World Cup 2026》主题曲',
+    'en',
+  )).toBe('Theme song for the sports event “World Cup 2026”')
 })
 
 test('keeps nested title punctuation paired while parsing and formatting', () => {

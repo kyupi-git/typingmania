@@ -60,3 +60,21 @@ test('QQ Music index preserves chronological added order', () => {
   expect(index[0].contents.map(song => song.title))
     .toEqual(['Oldest fallback', 'Middle', 'Newest'])
 })
+
+test('each imported provider collection exposes distinct local preview artwork', () => {
+  const services = ['qqmusic', 'netease', 'apple-music', 'local-files']
+  const index = makeSongsIndex(services.map((service, index) => ({
+    title: `Song ${index}`,
+    artist: 'Artist',
+    source: { service, imported_at: `2026-07-${20 + index}T00:00:00.000Z` },
+    _local_filename: `${service}.typingmania`,
+  })))
+  const collections = index.filter(item => item.type === 'collection')
+  expect(collections.map(collection => collection.preview_image_url))
+    .toEqual([
+      'assets/provider-art/qqmusic.svg',
+      'assets/provider-art/netease.svg',
+      'assets/provider-art/apple-music.svg',
+      'assets/provider-art/local-files.svg',
+    ])
+})

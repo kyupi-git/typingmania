@@ -5,9 +5,25 @@ import path from 'path'
 import { jest, test } from '@jest/globals'
 
 import SongOriginResolver, {
+  japaneseAlbumTitle,
   resolveSongOrigin,
   SONG_ORIGIN_VERSION,
 } from './song-origin-resolver.js'
+
+test('Japanese character-song albums expose the native production title', () => {
+  expect(japaneseAlbumTitle('草莓棉花糖', [{
+    album: '苺ましまろ キャラクターソングアルバム (草莓棉花糖 角色歌专辑)',
+    albumMid: 'album-1',
+  }])).toEqual({
+    title: '苺ましまろ',
+    albumMid: 'album-1',
+  })
+  expect(japaneseAlbumTitle('我的青春恋爱物语果然有问题。', [{
+    album: 'TVアニメ｢やはり俺の青春ラブコメはまちがっている｡｣キャラクターソング集',
+  }])).toMatchObject({
+    title: 'やはり俺の青春ラブコメはまちがっている｡',
+  })
+})
 
 function metadata (overrides = {}) {
   return {
@@ -172,6 +188,37 @@ test('unrelated search results are rejected instead of guessing', async () => {
     }),
   })
   expect(origin).toBeNull()
+})
+
+test('live-action productions use Bangumi real-subject search, not anime records', async () => {
+  const fetchImpl = jest.fn(async url => {
+    expect(String(url)).toContain('cat=6')
+    return {
+      ok: true,
+      text: async () => `
+        <li id="item_654" class="item odd clearit">
+          <div class="inner"><h3>
+            <a href="/subject/654" class="l">示例电视剧</a>
+            <small class="grey">Example Drama</small>
+          </h3></div>
+        </li>
+      `,
+    }
+  })
+  const origin = await resolveSongOrigin({
+    metadata: metadata({
+      subtitle: '电视剧《示例电视剧》片头曲',
+      language: 'EN',
+    }),
+    fetchImpl,
+  })
+  expect(origin).toMatchObject({
+    work_title: 'Example Drama',
+    medium: 'television',
+    role: 'opening',
+    catalog: 'bangumi',
+    catalog_id: '654',
+  })
 })
 
 test('a localized catalog primary title is rejected for a Japanese work', async () => {
@@ -382,7 +429,7 @@ test('catalog aliases tolerate parenthetical, expanded, and season-number varian
 
 test('a cached source-work title is replaced by the direct anime title', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tmn-origin-cache-'))
-  const filename = path.join(root, 'data', 'qqmusic-origin-cache.json')
+  const filename = path.join(root, 'data', 'song-origin-cache.json')
   const entryKey = 'JP:我独自盗墓'
   try {
     await fs.mkdir(path.dirname(filename), { recursive: true })

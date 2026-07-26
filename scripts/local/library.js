@@ -44,14 +44,19 @@ export function songIdentity (song) {
   if (source.service === 'qqmusic' && source.song_mid) {
     return `qqmusic:${source.song_mid}`
   }
+  if (source.service && source.track_id) {
+    return `${source.service}:${source.track_id}`
+  }
   return songContentIdentity(song)
 }
 
-function songQualityScore (song) {
+export function songQualityScore (song) {
   const source = song.source || {}
   const checks = source.checks || {}
   const quality = source.quality || {}
-  let score = source.service === 'qqmusic' ? 0 : 5
+  let score = ['qqmusic', 'netease', 'apple-music'].includes(source.service)
+    ? 0
+    : 5
   score += Number(quality.version || quality.quality_version || 0) * 50
   for (const value of Object.values(checks)) {
     if (value === true) score += 2
@@ -111,7 +116,14 @@ function isSafeLibraryFile (root, filename) {
 
 const RESET_ARTIFACT_PATHS = [
   ['data', 'qqmusic'],
+  ['data', 'netease'],
+  ['data', 'apple-music'],
+  ['data', 'local-files'],
+  ['data', 'mv-cache'],
+  ['data', 'upload-sessions'],
+  ['data', 'import-staging'],
   ['data', 'trial-itsaetara'],
+  ['data', 'song-origin-cache.json'],
   ['data', 'qqmusic-origin-cache.json'],
   ['data', 'qqmusic-artist-cache.json'],
   ['data', 'cover-refresh.out.log'],
@@ -229,7 +241,7 @@ function browserPath (root, filename) {
     .join('/')
 }
 
-export async function scanSongLibrary (root) {
+export async function scanSongPackages (root) {
   const files = await findTypingManiaFiles(root, root)
   files.sort((left, right) => left.localeCompare(right))
 
@@ -254,24 +266,36 @@ export async function scanSongLibrary (root) {
         _local_filename: filename,
         _identity: identity,
       }
-      const duplicateIndex = records.findIndex(record => (
-        record._identity === identity || songsAreEquivalent(record, candidate)
-      ))
-      if (duplicateIndex < 0) {
-        records.push(candidate)
-      } else if (songQualityScore(candidate) > songQualityScore(records[duplicateIndex])) {
-        records[duplicateIndex] = candidate
-      }
+      records.push(candidate)
     } catch (error) {
       errors.push({ filename, error: error.message })
     }
   }
 
+  return { records, errors, scannedFiles: files.length }
+}
+
+export async function scanSongLibrary (root) {
+  const scanned = await scanSongPackages(root)
+  const records = []
+  for (const candidate of scanned.records) {
+    const duplicateIndex = records.findIndex(record => (
+      record._identity === candidate._identity ||
+      songsAreEquivalent(record, candidate)
+    ))
+    if (duplicateIndex < 0) {
+      records.push(candidate)
+    } else if (
+      songQualityScore(candidate) > songQualityScore(records[duplicateIndex])
+    ) {
+      records[duplicateIndex] = candidate
+    }
+  }
   records.sort((left, right) => {
     return String(left.artist || '').localeCompare(String(right.artist || '')) ||
       String(left.title || '').localeCompare(String(right.title || ''))
   })
-  return { records, errors, scannedFiles: files.length }
+  return { ...scanned, records }
 }
 
 export function makeSongsIndex (records) {
@@ -282,42 +306,81 @@ export function makeSongsIndex (records) {
     return song
   }
 
-  const regular = records.filter(record => record.source?.service !== 'qqmusic').map(clean)
-  const qqmusic = records
-    .filter(record => record.source?.service === 'qqmusic')
-    .sort((left, right) => {
-      const leftAdded = Date.parse(
-        left.source?.imported_at || left.source?.verified_at || '',
-      ) || 0
-      const rightAdded = Date.parse(
-        right.source?.imported_at || right.source?.verified_at || '',
-      ) || 0
-      return leftAdded - rightAdded ||
-        String(left._local_filename || '').localeCompare(
-          String(right._local_filename || ''),
-        )
-    })
+  const providers = [
+    {
+      service: 'qqmusic',
+      name: 'QQ Music',
+      description: 'Songs imported from QQ Music cache and downloads.',
+      translations: {
+        zh: { name: 'QQ音乐', description: '从 QQ 音乐缓存和下载中导入的歌曲。' },
+        en: { name: 'QQ Music', description: 'Songs imported from QQ Music cache and downloads.' },
+        ja: { name: 'QQ Music', description: 'QQ Musicのキャッシュとダウンロードから取り込んだ曲です。' },
+      },
+      preview_image_url: 'assets/provider-art/qqmusic.svg',
+    },
+    {
+      service: 'netease',
+      name: 'NetEase Cloud Music',
+      description: 'Songs imported from complete NetEase downloads and cache.',
+      translations: {
+        zh: { name: '网易云音乐', description: '从网易云音乐完整下载和缓存中导入的歌曲。' },
+        en: { name: 'NetEase Cloud Music', description: 'Songs imported from complete NetEase downloads and cache.' },
+        ja: { name: 'NetEase Cloud Music', description: 'NetEaseの完全なダウンロードとキャッシュから取り込んだ曲です。' },
+      },
+      preview_image_url: 'assets/provider-art/netease.svg',
+    },
+    {
+      service: 'apple-music',
+      name: 'Apple Music',
+      description: 'Songs imported through an authorized Apple Music session.',
+      translations: {
+        zh: { name: 'Apple Music', description: '通过已授权 Apple Music 会话导入的歌曲。' },
+        en: { name: 'Apple Music', description: 'Songs imported through an authorized Apple Music session.' },
+        ja: { name: 'Apple Music', description: '認証済みApple Musicセッションから取り込んだ曲です。' },
+      },
+      preview_image_url: 'assets/provider-art/apple-music.svg',
+    },
+    {
+      service: 'local-files',
+      name: 'Local Folder',
+      description: 'Songs copied from a folder and verified locally.',
+      translations: {
+        zh: { name: '本地文件夹', description: '从所选文件夹复制、匹配并校验的歌曲。' },
+        en: { name: 'Local Folder', description: 'Songs copied from a folder and verified locally.' },
+        ja: { name: 'ローカルフォルダー', description: '選択したフォルダーからコピーし、照合・検証した曲です。' },
+      },
+      preview_image_url: 'assets/provider-art/local-files.svg',
+    },
+  ]
+  const providerServices = new Set(providers.map(provider => provider.service))
+  const regular = records
+    .filter(record => !providerServices.has(record.source?.service))
     .map(clean)
-  if (qqmusic.length) {
+  for (const provider of providers) {
+    const imported = records
+      .filter(record => record.source?.service === provider.service)
+      .sort((left, right) => {
+        const leftAdded = Date.parse(
+          left.source?.imported_at || left.source?.verified_at || '',
+        ) || 0
+        const rightAdded = Date.parse(
+          right.source?.imported_at || right.source?.verified_at || '',
+        ) || 0
+        return leftAdded - rightAdded ||
+          String(left._local_filename || '').localeCompare(
+            String(right._local_filename || ''),
+          )
+      })
+      .map(clean)
+    if (!imported.length) continue
     regular.push({
       type: 'collection',
-      name: 'QQ Music',
-      description: 'Songs imported locally from QQ Music cache.',
-      translations: {
-        zh: {
-          name: 'QQ音乐',
-          description: '从QQ音乐缓存导入到本地的歌曲。',
-        },
-        en: {
-          name: 'QQ Music',
-          description: 'Songs imported locally from QQ Music cache.',
-        },
-        ja: {
-          name: 'QQ Music',
-          description: 'QQ Musicのキャッシュからローカルに取り込んだ曲です。',
-        },
-      },
-      contents: qqmusic,
+      name: provider.name,
+      description: provider.description,
+      translations: provider.translations,
+      preview_image_url: provider.preview_image_url,
+      preview_image_is_poster: false,
+      contents: imported,
     })
   }
   return regular

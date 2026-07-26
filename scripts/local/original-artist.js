@@ -9,7 +9,10 @@ const CACHE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000
 const NEGATIVE_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 const ROLE_CREDIT = /(?:\bCV\s*[:：.]|\bfeat\.?\b|\bfeaturing\b|\bfrom\b|\bwith\b)/iu
 const LOCALIZED_BILINGUAL = /^[\p{Script=Han}\s·・]+[\(（][^\)）]*[A-Za-z\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}][^\)）]*[\)）]$/u
-const SIMPLIFIED_JAPANESE_FORMS = /[亚爱边滨仓处单岛东发广龟国华画会纪乐丽龙门气冈归实树岁团图万为盐应驿运战泽转阳间乡濑户宫樱线黑变读铁观]/u
+// Only include simplified forms that differ from normal Japanese shinjitai.
+// Shared characters such as 国, 会, 気, 実, 戦, 図, 駅, and 読 are valid in
+// native Japanese names and must not make an artist look localized.
+const SIMPLIFIED_JAPANESE_FORMS = /[亚爱边滨仓处单岛东发广龟华纪乐丽龙门冈归树岁团盐应驿运战泽转阳乡濑宫樱线黑变读铁观]/u
 const WIKI_ITEM = /<item>\s*<key><!\[CDATA\[([\s\S]*?)\]\]><\/key>\s*<value><!\[CDATA\[([\s\S]*?)\]\]><\/value>\s*<\/item>/gu
 const ORIGINAL_NAME_KEYS = [
   '原文名',

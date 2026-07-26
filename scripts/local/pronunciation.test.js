@@ -12,6 +12,9 @@ import {
 test('detects the supported lyric language families', () => {
   expect(lyricLanguage('ZH', '你好')).toBe('zh')
   expect(lyricLanguage('JP', '明日')).toBe('ja')
+  expect(lyricLanguage('JP', 'Follow the light')).toBe('en')
+  expect(lyricLanguage('ZH', 'Tonight')).toBe('en')
+  expect(lyricLanguage('ZH', '音乐 makes me smile')).toBe('zh')
   expect(lyricLanguage('', 'かな')).toBe('ja')
   expect(lyricLanguage('', 'hello')).toBe('en')
 })
@@ -58,6 +61,7 @@ test('Japanese requires its supplied reading while English uses original text', 
     source: 'qqmusic-qrc-roma',
   })
   expect(requiresSongSpecificReading('JP', '宇宙')).toBe(true)
+  expect(requiresSongSpecificReading('JP', 'Follow the light')).toBe(false)
   expect(requiresSongSpecificReading('EN', 'space')).toBe(false)
   expect(pronunciationForLine({
     text: 'Follow the light',

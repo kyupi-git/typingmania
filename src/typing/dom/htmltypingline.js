@@ -10,8 +10,10 @@ export default class HTMLTypingLine {
       ruby_height: '30px',
       ruby_font: SongFont.size(30),
       spacing: '5px',
-      no_reading_height: '90px',
-      no_reading_font: SongFont.size(60),
+      // Latin descenders need a little breathing room, but a 60 px face in a
+      // 80 px playfield can still be clipped by browser font metrics.
+      no_reading_height: '76px',
+      no_reading_font: SongFont.size(54),
       color: 'white',
       disabled_color: '#999',
       inactive_color: '#ccc',

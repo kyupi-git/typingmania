@@ -5,6 +5,7 @@ import {
   finishImportBatch,
   needsMoreNewSongs,
   prioritizeUnseenTracks,
+  recordImportFailure,
 } from './import-batch.js'
 
 test('only newly imported songs consume the batch of twenty', () => {
@@ -24,6 +25,24 @@ test('only newly imported songs consume the batch of twenty', () => {
   expect(finishImportBatch(result, 124)).toMatchObject({
     batchComplete: true,
     cacheExhausted: false,
+  })
+})
+
+test('failure reasons are classified for an actionable import summary', () => {
+  const result = createImportBatchResult(20)
+  recordImportFailure(result, {
+    title: 'Example',
+    stage: 'lyrics',
+    error: new Error('Lyrics failed pronunciation coverage'),
+  })
+  expect(result).toMatchObject({
+    failed: 1,
+    failureReasons: { pronunciation: 1 },
+  })
+  expect(result.failures[0]).toMatchObject({
+    title: 'Example',
+    stage: 'lyrics',
+    category: 'pronunciation',
   })
 })
 

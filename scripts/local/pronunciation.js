@@ -10,11 +10,21 @@ const PINYIN_UMLAUT = new Map([
 
 export function lyricLanguage (value, text = '') {
   const declared = String(value || '').toLocaleUpperCase()
-  if (/^(?:ZH|CN|CHI|ZHO)$/.test(declared)) return 'zh'
-  if (/^(?:JP|JA|JPN)$/.test(declared)) return 'ja'
-  if (/^(?:EN|ENG)$/.test(declared)) return 'en'
-  if (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text)) return 'ja'
-  if (/\p{Script=Han}/u.test(text)) return 'zh'
+  const source = String(text || '')
+  const hasKana = /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(source)
+  const hasHan = /\p{Script=Han}/u.test(source)
+  const hasLatin = /\p{Script=Latin}/u.test(source)
+  if (hasKana) return 'ja'
+  if (hasHan) {
+    return /^(?:JP|JA|JPN)$/u.test(declared) ? 'ja' : 'zh'
+  }
+  // A declared song language describes the track, not necessarily every
+  // lyric row. Pure Latin rows in Japanese and Chinese songs are typed as
+  // their visible English text and must not require an invented reading.
+  if (hasLatin) return 'en'
+  if (/^(?:ZH|CN|CHI|ZHO)$/u.test(declared)) return 'zh'
+  if (/^(?:JP|JA|JPN)$/u.test(declared)) return 'ja'
+  if (/^(?:EN|ENG)$/u.test(declared)) return 'en'
   return 'en'
 }
 

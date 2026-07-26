@@ -2,8 +2,11 @@ import path from 'path'
 import { test } from '@jest/globals'
 
 import {
+  browserRecordBelongsToProject,
+  parseBrowserRecord,
   parseNetstatOwner,
   parseManagedRecord,
+  parseTasklistImage,
   recordBelongsToProject,
 } from './terminate-local-server.js'
 
@@ -45,4 +48,37 @@ test('legacy shutdown resolves only a localhost listening PID', () => {
 
   expect(parseNetstatOwner(output, 8765)).toBe(222)
   expect(parseNetstatOwner(output, 8766)).toBe(0)
+})
+
+test('browser records bind an Edge app window to this exact project', () => {
+  const root = path.resolve('C:/Games/TypingManiaNovel')
+  const record = {
+    processId: 456,
+    projectRoot: root,
+    executable: 'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+    profile: path.join(root, 'data', 'runtime', 'edge-profile'),
+    url: 'http://127.0.0.1:8765/',
+  }
+  expect(browserRecordBelongsToProject(record, root)).toBe(true)
+  expect(browserRecordBelongsToProject({
+    ...record,
+    profile: path.resolve('C:/Users/Public/Edge'),
+  }, root)).toBe(false)
+  expect(browserRecordBelongsToProject({
+    ...record,
+    url: 'https://example.com/',
+  }, root)).toBe(false)
+})
+
+test('tasklist parsing accepts only a concrete CSV process row', () => {
+  expect(parseTasklistImage(
+    '"msedge.exe","456","Console","1","100,000 K"',
+  )).toEqual({
+    image: 'msedge.exe',
+    processId: 456,
+  })
+  expect(parseTasklistImage('INFO: No tasks are running.')).toBeNull()
+  expect(parseBrowserRecord('{"processId":456}')).toMatchObject({
+    processId: 456,
+  })
 })

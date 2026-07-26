@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" role="img" aria-label="Songs imported from a local folder">
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b3f74"/><stop offset="1" stop-color="#7252b9"/></linearGradient><filter id="shadow"><feDropShadow dx="0" dy="24" stdDeviation="28" flood-opacity=".34"/></filter></defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <circle cx="960" cy="470" r="340" fill="#fff" opacity=".1"/>
+  <g fill="none" stroke="#fff" stroke-width="38" stroke-linecap="round" stroke-linejoin="round" filter="url(#shadow)">
+    <path d="M620 360h270l75 85h335v350H620z"/>
+    <path d="M1020 510v170c0 68-55 123-123 123s-123-55-123-123 55-123 123-123c27 0 53 9 73 24"/>
+    <path d="M1020 510c55 102 125 155 210 165"/>
+  </g>
+  <text x="960" y="930" text-anchor="middle" fill="#fff" font-family="Open Sans, sans-serif" font-size="84" font-weight="700">Local Folder</text>
+</svg>

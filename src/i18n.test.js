@@ -36,10 +36,10 @@ test('language switching persists and interpolates interface text', () => {
     setItem: (_, value) => { storage.value = value },
   }
   const i18n = new I18n({ languages: ['en-US'], storage })
-  expect(i18n.t('menu.language', { language: i18n.languageName() })).toBe('Language: English')
+  expect(i18n.t('menu.language', { language: i18n.languageName() })).toBe('Language')
   i18n.setLocale('zh-CN')
   expect(storage.value).toBe('zh')
-  expect(i18n.t('menu.language', { language: i18n.languageName() })).toBe('界面：中文')
+  expect(i18n.t('menu.language', { language: i18n.languageName() })).toBe('界面语言')
 })
 
 test('interface instructions use locale-specific grammar and punctuation', () => {
@@ -60,20 +60,26 @@ test('interface instructions use locale-specific grammar and punctuation', () =>
     .toBe('导入。按 Q')
   expect(ja.t('common.labelWithHint', { label: '取り込む', hint: 'Qを押す' }))
     .toBe('取り込む。Qを押す')
+  expect(en.t('common.labelWithKey', { label: 'Add music', key: 'Q' }))
+    .toBe('Add music (Q)')
+  expect(zh.t('common.labelWithKey', { label: '添加歌曲', key: 'Q' }))
+    .toBe('添加歌曲(Q)')
+  expect(ja.t('common.labelWithKey', { label: '曲を追加', key: 'Q' }))
+    .toBe('曲を追加（Q）')
 
   expect(en.t('menu.keyEffects', { state: en.t('common.enabled') }))
-    .toBe('Keyfall FX: On')
+    .toBe('Keyfall: On')
   expect(zh.t('menu.keyEffects', { state: zh.t('common.disabled') }))
     .toBe('按键雨：关')
   expect(ja.t('menu.keyEffects', { state: ja.t('common.enabled') }))
     .toBe('キー演出：オン')
 
   expect(en.t('menu.demoMode', { state: en.t('common.enabled') }))
-    .toBe('Autoplay: On')
+    .toBe('Demo: On')
   expect(zh.t('menu.demoMode', { state: zh.t('common.disabled') }))
-    .toBe('自动演示：关')
+    .toBe('演示：关')
   expect(ja.t('menu.demoMode', { state: ja.t('common.enabled') }))
-    .toBe('オートプレイ：オン')
+    .toBe('デモ：オン')
   expect(en.t('songInfo.cpmMax'))
     .toBe('Required keys/min (avg / fastest 5 sec)')
   expect(zh.t('songInfo.cpmMax'))
@@ -86,10 +92,10 @@ test('interface instructions use locale-specific grammar and punctuation', () =>
   })).toBe('Sort · Required keys/min ↓')
   expect(zh.t('sort.direction.desc')).toBe('逆序')
   expect(ja.t('sort.mode.artist')).toBe('アーティスト')
-  expect(zh.t('import.other')).toBe('其它方式[功能待开发]')
-  expect(en.t('import.other')).toBe('Other methods  [Coming later]')
-  expect(ja.t('import.other')).toContain('その他の方法')
-  expect(en.t('import.qqMusicDetail')).toContain('next 20')
+  expect(zh.t('import.netease')).toBe('网易云音乐')
+  expect(en.t('import.appleMusic')).toBe('Apple Music')
+  expect(ja.t('import.neteaseDetail')).toContain('キャッシュ')
+  expect(en.t('import.qqMusicDetail')).toContain('custom-sized')
   expect(ja.t('import.selectTitle')).toBe('曲の追加元を選ぶ')
 })
 
@@ -133,7 +139,16 @@ test('about text identifies the public project and major components', () => {
     expect(i18n.t('about.credit.foundation')).not.toBe(
       'about.credit.foundation',
     )
-    expect(i18n.t('about.credit.services')).not.toBe('about.credit.services')
+    for (const key of [
+      'about.credit.qqInterop',
+      'about.credit.neteaseInterop',
+      'about.credit.appleInterop',
+      'about.credit.language',
+      'about.credit.musicCatalogs',
+      'about.credit.screenCatalogs',
+    ]) {
+      expect(i18n.t(key)).not.toBe(key)
+    }
   }
 })
 
@@ -212,6 +227,19 @@ test('QQ Music hides an anime origin when only a translated work title is known'
   expect(displaySongSubtitle(song, 'en')).toBe('')
   expect(displaySongSubtitle(song, 'ja')).toBe('')
 })
+
+test.each(['netease', 'apple-music', 'local-files'])(
+  '%s hides a structured provider subtitle until the original title is verified',
+  service => {
+    const song = {
+      subtitle: '《示例中文译名》TV动画片头曲',
+      source: { service },
+    }
+    expect(displaySongSubtitle(song, 'zh')).toBe('')
+    expect(displaySongSubtitle(song, 'en')).toBe('')
+    expect(displaySongSubtitle(song, 'ja')).toBe('')
+  },
+)
 
 test('QQ Music rejects a legacy unverified structured origin in the interface', () => {
   const song = {

@@ -15,7 +15,10 @@ export default class SongController {
     this.demo_player = null
     this.auto_paused = false
 
-    this.vis_bins = new Uint8Array(game.sound.analyser.frequencyBinCount)
+    this.animation_frame_id = null
+    this.animation_frame_callback = this.animationFrame.bind(this)
+    this.animation_error_count = 0
+    this.optional_frame_failures = new Set()
 
     // To pause song when tab go out of focus
     // This is kinda important because the main loop use the requestAnimationFrame mechanism
@@ -23,6 +26,8 @@ export default class SongController {
   }
 
   async run () {
+    this.optional_frame_failures.clear()
+    this.animation_error_count = 0
     this.game.song_screen.show()
     this.game.song_screen.setTypingRuby(false)
     this.game.song_screen.setKeyEffectsEnabled(
@@ -68,21 +73,26 @@ export default class SongController {
 
     // Media time remains at zero during the lead-in, so lyric timing,
     // predictive Keyfall targets, scoring, and CPM retain one shared clock.
+    // Create the end signal before the first frame. Empty or malformed
+    // timelines must never be able to call an undefined signal handler.
+    this.ended_signal = new Promise((resolve) => {
+      this.signal_end = resolve
+    })
     this.in_screen = true
-    this.animationFrame()
+    this.animation_frame_id = requestAnimationFrame(
+      this.animation_frame_callback,
+    )
 
     // Play media
     this.game.media.play()
+    this.game.music_video?.play(this.game.media)
     this.triggerTypingChange()
 
     if (this.game.media.hasVideo()) {
       this.game.background_screen.hideSongBackground()
+    } else if (this.game.music_video) {
+      this.game.background_screen.hideSongPoster()
     }
-
-    // End signaler from main loop to input loop (this function)
-    this.ended_signal = new Promise((resolve) => {
-      this.signal_end = resolve
-    })
 
     // Set up the human-paced perfect demonstration.
     if (this.game.game_mode === 'auto') {
@@ -115,15 +125,7 @@ export default class SongController {
 
       // Skip line
       if (keyEvent.key === 'Tab') {
-        const line = this.game.typing.getCurrentLine()
-        if (line) {
-          this.game.song_screen.finishKeyEffectLine(
-            this.game.typing.current_line,
-            this.game.media.getCurrentTime(),
-            !line.isCompleted(),
-          )
-          this.game.media.skipTo(line.end_time - 0.2)
-        }
+        this.skipCurrentLine()
         continue
       }
 
@@ -155,10 +157,15 @@ export default class SongController {
     this.game.song_screen.endKeyEffects()
     this.game.background_screen.showSongUI(false)
     this.in_screen = false
+    if (this.animation_frame_id !== null) {
+      cancelAnimationFrame(this.animation_frame_id)
+      this.animation_frame_id = null
+    }
 
-    if (this.game.media.hasVideo()) {
+    if (this.game.media.hasVideo() || this.game.music_video) {
       this.game.background_screen.showSongBackground()
     }
+    this.game.music_video?.pause()
 
     if (this.demo_player) {
       this.demo_player.stop()
@@ -261,18 +268,69 @@ export default class SongController {
     }
   }
 
+  runOptionalFramePart (name, callback) {
+    if (this.optional_frame_failures.has(name)) return
+    try {
+      callback()
+    } catch (error) {
+      this.optional_frame_failures.add(name)
+      console.error(`Disabled optional song effect after a runtime error: ${name}`, error)
+      if (name === 'keyfall') {
+        try {
+          this.game.song_screen.endKeyEffects()
+        } catch {}
+      }
+    }
+  }
+
+  skipCurrentLine () {
+    const line = this.game.typing.getCurrentLine()
+    if (!line) return false
+    const currentTime = this.game.media.getCurrentTime()
+    this.game.song_screen.finishKeyEffectLine(
+      this.game.typing.current_line,
+      currentTime,
+      !line.isCompleted(),
+    )
+    // Seek just beyond the scoring window. The former -0.2 second target
+    // often rendered the same line again and made Tab appear ineffective.
+    this.game.media.skipTo(Math.max(currentTime, line.end_time + 0.01))
+    this.game.music_video?.skipTo(this.game.media)
+    return true
+  }
+
+  reportAnimationError (error) {
+    this.animation_error_count++
+    // Avoid flooding the console when a browser extension or a damaged
+    // element causes the same operation to fail on successive frames.
+    if (
+      this.animation_error_count <= 3 ||
+      this.animation_error_count % 120 === 0
+    ) {
+      console.error('Song frame recovered from a runtime error', error)
+    }
+  }
+
   animationFrame () {
-    // Only request animation frame if screen is still active
-    if (this.in_screen) {
+    this.animation_frame_id = null
+    if (!this.in_screen) return
+    try {
       const current_time = this.game.media.getCurrentTime()
       const duration = this.game.media.getDuration()
-      this.game.song_screen.updateKeyEffects(current_time)
+      this.runOptionalFramePart('keyfall', () => {
+        this.game.song_screen.updateKeyEffects(current_time)
+      })
+      this.runOptionalFramePart('music-video', () => {
+        this.game.music_video?.sync(this.game.media)
+      })
 
       // Update song playback info on screen
       this.game.song_screen.ui_time.text(`${format_time(current_time)} / ${format_time(duration)}`)
 
       // Main progress bar
-      this.game.song_screen.ui_progress_all.progress(current_time / duration)
+      this.game.song_screen.ui_progress_all.progress(
+        duration > 0 ? current_time / duration : 0,
+      )
 
       // Interval progress bar
       const current_line = this.game.typing.getCurrentLine()
@@ -284,31 +342,39 @@ export default class SongController {
 
       // Update typing system
       if (this.demo_player) {
-        this.demo_player.update(current_time)
+        this.runOptionalFramePart('demo', () => {
+          this.demo_player.update(current_time)
+        })
       }
       if (this.game.game_mode === 'easy' && current_line && current_time > current_line.end_time && !current_line.isCompleted()) {
         // In easy mode, wait for the line to complete before advancing
         const left_percent =  (1 - (current_line.getLeftoverCharCount() / current_line.getCharacterCount()))
         this.game.media.skipTo(current_line.start_time + left_percent * (current_line.end_time - current_line.start_time))
       } else {
-        const previousLine = this.game.typing.current_line
-        const [changed, leftover] = this.game.typing.update(current_time)
-        if (changed) {
-          this.game.song_screen.finishKeyEffectLine(
-            previousLine,
-            current_time,
-            leftover > 0,
-          )
-          // Typing line has changed
-          if (leftover > 0) {
-            // The line isn't completed, update the score
-            this.game.score.onLineEnd(leftover, current_time)
-            // Play skip sfx when line is skipped
-            this.game.sfx.play('skip')
+        const transitions = this.game.typing.advanceTo(current_time)
+        let skipped = false
+        for (const transition of transitions) {
+          this.runOptionalFramePart('keyfall', () => {
+            this.game.song_screen.finishKeyEffectLine(
+              transition.lineId,
+              current_time,
+              transition.leftover > 0,
+            )
+          })
+          if (transition.leftover > 0) {
+            this.game.score.onLineEnd(
+              transition.leftover,
+              transition.endTime,
+            )
+            skipped = true
           }
-
-          // Trigger start of the new line
+          // TypingMania NEO starts the next scoring window at the frame that
+          // actually observed the transition. Keeping that clock preserves
+          // score comparability when a delayed frame crosses several lines.
           this.game.score.onLineStart(current_time)
+        }
+        if (transitions.length) {
+          if (skipped) this.game.sfx.play('skip')
           this.triggerTypingChange()
         }
       }
@@ -323,11 +389,17 @@ export default class SongController {
         this.signal_end(true)
       }
 
-      // Visualization
-      this.game.sound.analyser.getByteFrequencyData(this.vis_bins)
-      this.game.song_screen.showVisualization(this.vis_bins)
-
-      requestAnimationFrame(this.animationFrame.bind(this))
+      this.animation_error_count = 0
+    } catch (error) {
+      this.reportAnimationError(error)
+    } finally {
+      // One rendering exception must not permanently stop the visual loop
+      // while the independently decoded audio keeps playing.
+      if (this.in_screen) {
+        this.animation_frame_id = requestAnimationFrame(
+          this.animation_frame_callback,
+        )
+      }
     }
   }
 
@@ -336,10 +408,13 @@ export default class SongController {
       this.auto_paused = true
       if (this.game.media)
         this.game.media.pause()
+      this.game.music_video?.pause()
     } else {
       this.auto_paused = false
-      if (this.game.media && this.in_screen)
+      if (this.game.media && this.in_screen) {
         this.game.media.play()
+        this.game.music_video?.play(this.game.media)
+      }
     }
   }
 }

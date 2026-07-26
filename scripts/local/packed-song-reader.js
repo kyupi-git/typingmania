@@ -5,6 +5,7 @@ const MAX_FILE_TABLE_BYTES = 64 * 1024
 const MAX_METADATA_BYTES = 1024 * 1024
 const MAX_ARTWORK_BYTES = 20 * 1024 * 1024
 const MAX_TEXT_ENTRY_BYTES = 8 * 1024 * 1024
+const MAX_MEDIA_ENTRY_BYTES = 1024 * 1024 * 1024
 
 const ARTWORK_MIME_TYPES = {
   '.avif': 'image/avif',
@@ -125,6 +126,25 @@ export async function readPackedSongText (
       String(entryName || ''),
       Math.max(1, Number(maxBytes) || MAX_TEXT_ENTRY_BYTES),
     )).toString('utf8')
+  } finally {
+    await handle.close()
+  }
+}
+
+export async function readPackedSongBinary (
+  filename,
+  entryName,
+  maxBytes = MAX_MEDIA_ENTRY_BYTES,
+) {
+  const handle = await fs.open(filename, 'r')
+  try {
+    const entries = await readFileTable(handle)
+    return await readEntry(
+      handle,
+      entries,
+      String(entryName || ''),
+      Math.max(1, Number(maxBytes) || MAX_MEDIA_ENTRY_BYTES),
+    )
   } finally {
     await handle.close()
   }

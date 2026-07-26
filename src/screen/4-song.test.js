@@ -27,10 +27,13 @@ test('original and pending lyrics are laid out from the left edge', () => {
   expect(screen.ui_typing_line.el.style.left).toBe('200px')
   expect(screen.ui_ruby.el.style.left).toBe('270px')
   expect(screen.ui_ruby.el.style.width).toBe('1650px')
-  expect(screen.ui_ruby.el.style.overflow).toBe('hidden')
+  expect(screen.ui_ruby.el.style.overflow).toBe('visible')
 
   screen.setTypingText('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.repeat(3))
   expect(screen.ui_typing_line.el.style.fontSize).toBe('40px')
+  expect(screen.vis_box).toBeUndefined()
+  expect(screen.layer.el.querySelector('[style*="background: rgb(204, 204, 204)"]'))
+    .toBeNull()
 })
 
 test('songs without an early lyric skip the lead-in immediately', async () => {

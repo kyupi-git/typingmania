@@ -43,6 +43,11 @@ test('QQ Music wiki foreign name replaces a localized Japanese singer name', () 
   })
 })
 
+test('localized detection distinguishes simplified aliases from Japanese shinjitai', () => {
+  expect(looksLocalizedArtistName('仓木麻衣', { language: 'JP' })).toBe(true)
+  expect(looksLocalizedArtistName('国府田マリ子', { language: 'JP' })).toBe(false)
+})
+
 test('a compound wiki alias field yields one native primary name', () => {
   const resolution = originalArtistFromDetail({
     rawName: '青木阳菜',

@@ -29,25 +29,34 @@ test('menu screen constructs provider and sort rows without runtime errors', () 
       code: POINTER_APPLY_CODE,
     })
 
-    const actionCount = actions.length
     screen.importSourceRows[1].el.click()
-    expect(actions).toHaveLength(actionCount)
-    expect(screen.importSourceRows[1].el.getAttribute('aria-disabled'))
-      .toBe('true')
-    expect(screen.importSourceRows[1].el.style.cursor).toBe('not-allowed')
+    expect(actions.at(-1)).toEqual({
+      key: '2',
+      code: POINTER_APPLY_CODE,
+    })
+    expect(screen.importSourceRows).toHaveLength(4)
+    expect(screen.resetScopeRows).toHaveLength(5)
+    expect(screen.importSourceRows[1].el.style.cursor).toBe('pointer')
   } finally {
     window.removeEventListener('keydown', onKeyDown)
   }
 })
 
-test('main actions share consistent sizing and readable localized hints', () => {
+test('main actions include shortcuts without separate hint fields', () => {
   const screen = createMenuScreen()
 
-  expect(screen.import_music_button.el.style.width).toBe('220px')
-  expect(screen.editLibraryButton.el.style.width).toBe('220px')
-  expect(screen.key_effects_hint.el.style.textShadow).toContain('rgba(8, 12, 20')
-  expect(screen.demo_mode_hint.el.style.textShadow).toContain('rgba(8, 12, 20')
-  expect(screen.language_hint.el.style.textShadow).toContain('rgba(8, 12, 20')
+  expect(screen.import_music_button.el.style.width).toBe('175px')
+  expect(screen.editLibraryButton.el.style.width).toBe('175px')
+  expect(screen.reset_library_button.el.style.width).toBe('175px')
+  expect(screen.metadata_refresh_button.el.style.width).toBe('175px')
+  expect(screen.import_music_label.el.innerText).toBe('Add music (Q)')
+  expect(screen.editLibraryLabel.el.innerText).toBe('Edit songs (E)')
+  expect(screen.key_effects_label.el.innerText).toBe('Keyfall: On (K)')
+  expect(screen.demo_mode_label.el.innerText).toBe('Demo: Off (M)')
+  expect(screen.language_label.el.innerText).toBe('Language (L)')
+  expect(screen.sort_label.el.innerText).toContain('(S)')
+  expect(screen.editLibraryHint).toBeUndefined()
+  expect(screen.sort_hint).toBeUndefined()
   expect(screen.parent_key.el.innerText).toBe('Esc / Backspace')
 })
 
@@ -56,9 +65,10 @@ test('about dialog exposes the repository and linked component credits', () => {
 
   expect(screen.author_label).toBeUndefined()
   expect(screen.about_button.el.style.left).toBe('1200px')
+  expect(screen.about_label.el.innerText).toBe('About (A)')
   expect(screen.about_github_label.el.innerText)
     .toContain('https://github.com/kyupi-git/typingmania')
-  expect(screen.about_version.el.innerText).toBe('Version 20260719')
+  expect(screen.about_version.el.innerText).toBe('Version 20260726')
   expect(screen.about_summary.el.innerText)
     .toBe('A lyrics-typing rhythm game built on TypingMania NEO.')
   expect(screen.about_credits_container.el.textContent).toContain('TypingMania NEO')
@@ -72,4 +82,25 @@ test('about dialog exposes the repository and linked component credits', () => {
   screen.hideAbout()
   expect(screen.dialogOpen).toBe(false)
   expect(screen.about_dialog.el.style.display).toBe('none')
+})
+
+test('song rows use a neutral marker instead of a language badge', () => {
+  const screen = createMenuScreen()
+  screen.setSongList({
+    children: [{
+      title: 'Example',
+      latin_title: 'Example',
+      artist: 'Artist',
+      language: 'JP',
+      media_type: 'audio',
+      cpm: 240,
+    }],
+  })
+
+  const text = [
+    screen.song_list_item[0].el,
+    ...screen.song_list_item[0].el.querySelectorAll('div'),
+  ].map(element => element.innerText || '').join(' ')
+  expect(text).toContain('•')
+  expect(text).not.toContain('JP')
 })

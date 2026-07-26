@@ -1,16 +1,86 @@
 import { refreshPackedSongArtist } from './artist-package.js'
 import { scanSongLibrary } from './library.js'
 import OriginalArtistResolver, {
+  looksLocalizedArtistName,
   ORIGINAL_ARTIST_VERSION,
 } from './original-artist.js'
 import { fetchTrackMetadata } from './qqmusic-api.js'
 
+const IMPORTED_SERVICES = new Set([
+  'qqmusic',
+  'netease',
+  'apple-music',
+  'local-files',
+])
+
 export function needsArtistRefresh (song) {
   return (
     song?.source?.service === 'qqmusic' &&
-    Number(song.source?.artist_resolution?.version || 0) <
-      ORIGINAL_ARTIST_VERSION
+    (
+      Number(song.source?.artist_resolution?.version || 0) <
+        ORIGINAL_ARTIST_VERSION ||
+      song.source?.artist_resolution?.resolved !== true
+    )
   )
+}
+
+export function needsUnverifiedLocalizedArtistCleanup (song) {
+  return Boolean(
+    IMPORTED_SERVICES.has(song?.source?.service) &&
+    song.artist &&
+    song.source?.checks?.artist_original !== true &&
+    looksLocalizedArtistName(song.artist, { language: song.language }),
+  )
+}
+
+export async function hideUnverifiedLocalizedArtistNames ({
+  root,
+  records = null,
+  refreshArtist = refreshPackedSongArtist,
+  onProgress = () => {},
+} = {}) {
+  const songs = records || (await scanSongLibrary(root)).records
+  const candidates = songs.filter(needsUnverifiedLocalizedArtistCleanup)
+  const result = {
+    inspected: 0,
+    hidden: 0,
+    failed: 0,
+    failures: [],
+  }
+  for (const song of candidates) {
+    result.inspected++
+    try {
+      const rawArtist = String(song.artist || '')
+      const refreshed = await refreshArtist(song, {
+        artist: '',
+        resolved: false,
+        checkedAt: new Date().toISOString(),
+        artists: [{
+          rawName: rawArtist,
+          originalName: '',
+          resolved: false,
+          source: 'unverified-localized-alias-hidden',
+          confidence: 0,
+        }],
+      })
+      const index = songs.indexOf(song)
+      if (index >= 0) songs[index] = refreshed
+      result.hidden++
+    } catch (error) {
+      result.failed++
+      result.failures.push({
+        title: song.title,
+        file: song._local_filename,
+        error: error.message,
+      })
+    }
+    onProgress({
+      ...result,
+      total: candidates.length,
+      songTitle: song.title,
+    })
+  }
+  return result
 }
 
 export async function refreshQQMusicArtistNames ({

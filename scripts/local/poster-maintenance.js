@@ -1,6 +1,6 @@
-import AnimePosterResolver, {
+import MediaPosterResolver, {
   POSTER_SELECTION_VERSION,
-} from './anime-poster.js'
+} from './media-poster.js'
 import {
   COVER_SELECTION_VERSION,
   refreshPackedSongPoster,
@@ -8,6 +8,24 @@ import {
 import { scanSongLibrary } from './library.js'
 
 const POSTER_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
+const POSTER_SUPPORTED_SERVICES = new Set([
+  'qqmusic',
+  'netease',
+  'apple-music',
+  'local-files',
+])
+const EXTERNAL_POSTER_CATALOGS = new Set(['tvmaze', 'tmdb'])
+
+function supportsVerifiedPoster (origin) {
+  const catalog = String(origin?.catalog || '').toLocaleLowerCase()
+  const catalogId = String(origin?.catalog_id || '')
+  if (catalog === 'bangumi') return /^\d+$/u.test(catalogId)
+  return Boolean(
+    EXTERNAL_POSTER_CATALOGS.has(catalog) &&
+    catalogId &&
+    origin?.poster_url
+  )
+}
 
 function comparableTitle (value) {
   return String(value || '')
@@ -24,9 +42,8 @@ export function needsPosterRefresh (
   } = {},
 ) {
   if (
-    song?.source?.service !== 'qqmusic' ||
-    String(song?.origin?.catalog || '').toLocaleLowerCase() !== 'bangumi' ||
-    !/^\d+$/u.test(String(song?.origin?.catalog_id || ''))
+    !POSTER_SUPPORTED_SERVICES.has(song?.source?.service) ||
+    !supportsVerifiedPoster(song?.origin)
   ) {
     return false
   }
@@ -49,7 +66,7 @@ export function needsPosterRefresh (
 function groupCandidates (songs) {
   const groups = new Map()
   for (const song of songs) {
-    const key = String(song.origin.catalog_id)
+    const key = `${song.origin.catalog}:${song.origin.catalog_id}`
     if (!groups.has(key)) {
       groups.set(key, {
         origin: song.origin,
@@ -61,7 +78,7 @@ function groupCandidates (songs) {
   return [...groups.values()]
 }
 
-export async function refreshOutdatedAnimePosters ({
+export async function refreshOutdatedMediaPosters ({
   root,
   records = null,
   resolver = null,
@@ -73,15 +90,13 @@ export async function refreshOutdatedAnimePosters ({
   const candidates = library.filter(song => (
     force
       ? (
-          song?.source?.service === 'qqmusic' &&
-          String(song?.origin?.catalog || '').toLocaleLowerCase() ===
-            'bangumi' &&
-          /^\d+$/u.test(String(song?.origin?.catalog_id || ''))
+          POSTER_SUPPORTED_SERVICES.has(song?.source?.service) &&
+          supportsVerifiedPoster(song?.origin)
         )
       : needsPosterRefresh(song)
   ))
   const groups = groupCandidates(candidates)
-  const posterResolver = resolver || new AnimePosterResolver()
+  const posterResolver = resolver || new MediaPosterResolver()
   const result = {
     inspected: 0,
     worksInspected: 0,

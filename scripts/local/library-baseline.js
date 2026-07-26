@@ -5,23 +5,23 @@ import path from 'path'
 import { buildStarterLibrary } from '../build-offline-demo.js'
 
 export const LIBRARY_BASELINE = Object.freeze({
-  version: 7,
+  version: 8,
   songs: Object.freeze([
     Object.freeze({
       relativePath: 'songs/demo-english.typingmania',
-      sha256: 'c57edd2276d76169a9ff6d3a7f7a84a83a7912d59d71fa4253393c9535ced953',
+      sha256: '98a443304452a7a4c9538e33cc420c0fce6634be7d9c1f5e88f8c8b031556443',
       title: 'Letters in the Light',
       sourceService: 'typingmania-demo',
     }),
     Object.freeze({
       relativePath: 'songs/demo-japanese.typingmania',
-      sha256: '03363291745c28f47c13c16190b0800c355e0226cb7cfe67e6c00acfea340e8c',
+      sha256: '977405405cc2036ffbcd950e9b86b938dd620c2066ff638944406dbc2db61f1c',
       title: '明日へのリズム',
       sourceService: 'typingmania-demo',
     }),
     Object.freeze({
       relativePath: 'songs/demo-chinese.typingmania',
-      sha256: 'fb2d6bea2c4454ebb0bfca8deef1326eec5539bfb7300081748dd8dc71ddeaad',
+      sha256: '6b1089feb030394d5f8dcbaabbe239358cbe3000abc2e2c06478e224fe94836b',
       title: '指尖星光',
       sourceService: 'typingmania-demo',
     }),

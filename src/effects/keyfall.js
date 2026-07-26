@@ -21,11 +21,11 @@ const MAX_IMPACTS = 4
 const MAX_STREAK_CELEBRATIONS = 2
 const STREAK_GLOW_START = 10
 const STREAK_FLASH_INTERVAL = 10
-const FULL_TARGET_TOP = 250
-const FULL_GROUND_TOP = 600
+const FULL_TARGET_TOP = 225
+const FULL_GROUND_TOP = 505
 const REDUCED_START_TOP = 115
-const REDUCED_TARGET_TOP = 245
-const REDUCED_GROUND_TOP = 425
+const REDUCED_TARGET_TOP = 220
+const REDUCED_GROUND_TOP = 385
 const RETIRE_DURATION = 160
 
 const KEY_STATES = {
@@ -142,8 +142,9 @@ export default class KeyfallEffect {
       contain: 'layout paint style',
     })
     this.streakAura = this.createStreakAura()
+    this.inputPulse = this.createInputPulse()
     this.guide = this.createGuide()
-    this.container.append(this.streakAura, this.guide)
+    this.container.append(this.streakAura, this.inputPulse, this.guide)
   }
 
   get activeCount () {
@@ -179,7 +180,7 @@ export default class KeyfallEffect {
       position: 'absolute',
       left: '48px',
       right: '48px',
-      top: '342px',
+      top: '317px',
       height: '2px',
       zIndex: '1',
       opacity: '0.54',
@@ -230,6 +231,49 @@ export default class KeyfallEffect {
     })
     aura.dataset.keyfallStreakAura = ''
     return aura
+  }
+
+  createInputPulse () {
+    const pulse = styles(document.createElement('div'), {
+      position: 'absolute',
+      inset: '0',
+      zIndex: '5',
+      opacity: '0',
+      pointerEvents: 'none',
+      willChange: 'opacity, transform',
+      transform: 'scale(1)',
+    })
+    pulse.dataset.keyfallInputPulse = ''
+    return pulse
+  }
+
+  pulseInput (correct, streak = 0) {
+    const strong = correct && Number(streak) >= 25
+    this.inputPulse.style.background = correct
+      ? `radial-gradient(ellipse at 50% 76%,
+          rgba(91,255,174,${strong ? 0.28 : 0.16}) 0%,
+          rgba(36,208,127,0.05) 42%,
+          transparent 70%),
+        linear-gradient(90deg,
+          rgba(72,255,160,${strong ? 0.28 : 0.12}),
+          transparent 12% 88%,
+          rgba(72,255,160,${strong ? 0.28 : 0.12}))`
+      : `radial-gradient(ellipse at 50% 76%,
+          rgba(255,77,84,0.22) 0%,
+          rgba(218,38,57,0.04) 44%,
+          transparent 70%),
+        linear-gradient(90deg,
+          rgba(255,55,71,0.22),
+          transparent 14% 86%,
+          rgba(255,55,71,0.22))`
+    this.animate(this.inputPulse, [
+      { opacity: correct ? (strong ? 0.92 : 0.65) : 0.82, transform: 'scale(0.998)' },
+      { opacity: 0, transform: 'scale(1.008)' },
+    ], {
+      duration: strong ? 190 : 125,
+      fill: 'forwards',
+      easing: 'ease-out',
+    })
   }
 
   update (currentTime) {
@@ -307,6 +351,7 @@ export default class KeyfallEffect {
       note.wrongLabel = keycapLabel(key)
       this.setState(note, 'wrong')
     }
+    this.pulseInput(correct, note.streak)
     this.updateNote(note, now)
     return note
   }
@@ -903,10 +948,15 @@ export default class KeyfallEffect {
       animation.cancel()
     }
     for (const child of [...this.container.children]) {
-      if (child !== this.guide && child !== this.streakAura) {
+      if (
+        child !== this.guide &&
+        child !== this.streakAura &&
+        child !== this.inputPulse
+      ) {
         child.remove()
       }
     }
+    this.inputPulse.style.opacity = '0'
     this.updateStreakAura(0)
     this.guide.style.display = 'none'
     this.items = []

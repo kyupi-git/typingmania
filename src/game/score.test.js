@@ -39,3 +39,28 @@ test('mistake-free completed lines are counted as perfect', () => {
   expect(result.overallAccuracy).toBe(100)
   expect(result.averageTension).toBeGreaterThan(0)
 })
+
+test('score and rank remain byte-for-byte compatible with TypingMania NEO rules', () => {
+  const score = new Score(6, { totalLines: 2 })
+  score.onLineStart(1)
+  score.onType(1.25, 1)
+  score.onType(1.5, 1)
+  score.onType(1.7, -1)
+  score.onType(2, 1)
+  score.onLineEnd(0, 2)
+  score.onLineStart(3)
+  score.onType(3.2, 1)
+  score.onType(3.45, 1)
+  score.onLineEnd(1, 4)
+
+  // Reference values are produced by the unmodified TypingMania NEO
+  // algorithm: 1,000 base points, live CPM × .25, combo bonus, -500 per
+  // error, and the original 10% / 15% line bonuses and rank thresholds.
+  expect(score.score).toBe(5191)
+  expect(score.base_score).toBe(7500)
+  expect(score.getClass()).toBe('D+')
+  expect(score.correct).toBe(5)
+  expect(score.missed).toBe(1)
+  expect(score.completed_line).toBe(1)
+  expect(score.skipped_char).toBe(1)
+})

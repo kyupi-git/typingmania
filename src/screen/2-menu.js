@@ -1,9 +1,6 @@
 import Screen from '../graphics/screen.js'
 import { Box, Group, Txt } from '../graphics/elements.js'
 import {
-  BadgeAudio,
-  BadgeVideo,
-  BadgeYouTube,
   Black,
   BtnBorder,
   Gray,
@@ -29,47 +26,94 @@ import {
 import LibraryEditorDialog from './library-editor-dialog.js'
 import { APP_VERSION, PROJECT_URL } from '../app-meta.js'
 
-const IMPORT_SOURCES = ['qqMusic', 'other']
+const IMPORT_SOURCES = ['qqMusic', 'netease', 'appleMusic', 'localFolder']
+const RESET_SOURCES = ['all', 'qqMusic', 'netease', 'appleMusic', 'localFolder']
 const WHEEL_STEP_THRESHOLD = 32
-const MENU_HINT_SHADOW =
-  '0 2px 4px rgba(8, 12, 20, .98), 0 0 9px rgba(8, 12, 20, .92)'
 const ABOUT_CREDIT_GROUPS = Object.freeze([
   {
     key: 'about.credit.foundation',
     links: [
       ['TypingMania NEO', 'https://github.com/innocenat/typingmania'],
+      ['Preact', 'https://github.com/preactjs/preact'],
+      ['HTM', 'https://github.com/developit/htm'],
     ],
   },
   {
     key: 'about.credit.runtime',
     links: [
       ['Node.js', 'https://nodejs.org/'],
+      ['Python', 'https://www.python.org/'],
+      ['FFmpeg', 'https://ffmpeg.org/'],
+      ['music-metadata', 'https://github.com/Borewit/music-metadata'],
     ],
   },
   {
-    key: 'about.credit.qqTools',
+    key: 'about.credit.qqInterop',
     links: [
       [
         '@clamber_l/crypto',
         'https://www.npmjs.com/package/@clamber_l/crypto',
       ],
-      [
-        'music-metadata',
-        'https://github.com/Borewit/music-metadata',
-      ],
     ],
   },
   {
-    key: 'about.credit.pinyin',
+    key: 'about.credit.neteaseInterop',
+    links: [
+      ['ncmdump', 'https://github.com/taurusxin/ncmdump'],
+    ],
+  },
+  {
+    key: 'about.credit.appleInterop',
+    links: [
+      ['gamdl', 'https://github.com/glomatico/gamdl'],
+      ['pywidevine', 'https://pypi.org/project/pywidevine/'],
+    ],
+  },
+  {
+    key: 'about.credit.language',
     links: [
       ['pinyin-pro', 'https://github.com/zh-lx/pinyin-pro'],
+      ['LRCLIB', 'https://www.lrclib.net/'],
     ],
   },
   {
-    key: 'about.credit.editor',
+    key: 'about.credit.musicCatalogs',
     links: [
-      ['Preact', 'https://github.com/preactjs/preact'],
-      ['HTM', 'https://github.com/developit/htm'],
+      ['QQ Music', 'https://y.qq.com/'],
+      ['NetEase Cloud Music', 'https://music.163.com/'],
+      ['Apple Music', 'https://music.apple.com/'],
+      [
+        'iTunes Search API',
+        'https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/',
+      ],
+      ['KuGou Music', 'https://www.kugou.com/'],
+      ['MusicBrainz', 'https://musicbrainz.org/'],
+      ['Cover Art Archive', 'https://coverartarchive.org/'],
+    ],
+  },
+  {
+    key: 'about.credit.screenCatalogs',
+    links: [
+      ['AniSongDB', 'https://anisongdb.com/'],
+      ['AnimeThemes', 'https://animethemes.moe/'],
+      ['AniList', 'https://anilist.co/'],
+      ['Bangumi API', 'https://bangumi.github.io/api/'],
+      ['TVmaze', 'https://www.tvmaze.com/api'],
+      ['TMDB', 'https://www.themoviedb.org/'],
+      ['Wikidata', 'https://www.wikidata.org/'],
+    ],
+  },
+  {
+    key: 'about.credit.onlinePlayback',
+    links: [
+      ['yt-dlp', 'https://github.com/yt-dlp/yt-dlp'],
+      ['AnimeThemes', 'https://animethemes.moe/'],
+      ['Bilibili', 'https://www.bilibili.com/'],
+      [
+        'YouTube IFrame API',
+        'https://developers.google.com/youtube/iframe_api_reference',
+      ],
+      ['Niconico', 'https://www.nicovideo.jp/'],
     ],
   },
   {
@@ -77,28 +121,19 @@ const ABOUT_CREDIT_GROUPS = Object.freeze([
     links: [
       ['esbuild', 'https://github.com/evanw/esbuild'],
       ['Jest', 'https://github.com/jestjs/jest'],
+      ['ws', 'https://github.com/websockets/ws'],
     ],
   },
   {
     key: 'about.credit.assets',
     links: [
+      ['Simple Icons', 'https://github.com/simple-icons/simple-icons'],
       ['Iosevka', 'https://github.com/be5invis/Iosevka'],
       ['Noto Sans CJK', 'https://github.com/notofonts/noto-cjk'],
       ['Open Sans', 'https://github.com/googlefonts/opensans'],
       [
         'Dustyroom SFX',
         'https://dustyroom.com/free-casual-game-sounds/',
-      ],
-    ],
-  },
-  {
-    key: 'about.credit.services',
-    links: [
-      ['QQ Music', 'https://y.qq.com/'],
-      ['Bangumi API', 'https://bangumi.github.io/api/'],
-      [
-        'YouTube IFrame API',
-        'https://developers.google.com/youtube/iframe_api_reference',
       ],
     ],
   },
@@ -110,13 +145,12 @@ export default class MenuScreen extends Screen {
     this.i18n = i18n
     this.current_mode = 'normal'
     this.key_effects_enabled = true
+    this.music_video_enabled = false
     this.demo_mode_enabled = false
     this.song_select_handler = null
     this.songScrollHandler = null
     this.dialogOpen = false
     this.wheelDelta = 0
-    this.importHintKey = 'menu.importHint'
-    this.importHintValues = {}
     this.sort_mode = 'added'
     this.sort_direction = 'asc'
     this.language_option_backgrounds = []
@@ -131,6 +165,12 @@ export default class MenuScreen extends Screen {
     this.importSourceLabels = []
     this.importSourceDetails = []
     this.importSourceRows = []
+    this.import_batch_value = 10
+    this.resetScopeBackgrounds = []
+    this.resetScopeMarkers = []
+    this.resetScopeLabels = []
+    this.resetScopeDetails = []
+    this.resetScopeRows = []
     this.libraryEditorDialog = new LibraryEditorDialog(i18n)
     const languageOptions = SUPPORTED_LOCALES.map((locale, index) => {
       const row = Group(660, 390 + index * 105, 600, 78, [
@@ -182,36 +222,59 @@ export default class MenuScreen extends Screen {
       return row
     })
     const importSourceOptions = IMPORT_SOURCES.map((source, index) => {
-      const row = Group(610, 365 + index * 140, 700, 112, [
-        this.importSourceBackgrounds[index] = Box(0, 0, 700, 112)
+      const row = Group(610, 275 + index * 105, 700, 88, [
+        this.importSourceBackgrounds[index] = Box(0, 0, 700, 88)
           .stroke(BtnBorder)
           .radius(10),
-        this.importSourceMarkers[index] = Txt(24, 0, 54, 112)
+        this.importSourceMarkers[index] = Txt(24, 0, 54, 88)
           .font(UIFont.size(32))
           .color(White)
           .align(CENTER),
-        this.importSourceLabels[index] = Txt(92, 14, 570, 42)
-          .font(UIFont.size(30))
+        this.importSourceLabels[index] = Txt(92, 6, 570, 36)
+          .font(UIFont.size(28))
           .color(White),
-        this.importSourceDetails[index] = Txt(92, 62, 570, 30)
-          .font(UIFont.size(19))
+        this.importSourceDetails[index] = Txt(92, 47, 570, 27)
+          .font(UIFont.size(18))
           .color(Gray)
           .noOverflow(),
       ])
       row.el.setAttribute('role', 'radio')
-      if (source === 'other') {
-        row.el.style.cursor = 'not-allowed'
-        row.el.setAttribute('aria-disabled', 'true')
-      } else {
-        row.el.style.cursor = 'pointer'
-        row.el.addEventListener('click', () => {
-          window.dispatchEvent(new KeyboardEvent('keydown', {
-            key: String(index + 1),
-            code: POINTER_APPLY_CODE,
-          }))
-        })
-      }
+      row.el.style.cursor = 'pointer'
+      row.el.addEventListener('click', () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', {
+          key: String(index + 1),
+          code: POINTER_APPLY_CODE,
+        }))
+      })
       this.importSourceRows.push(row)
+      return row
+    })
+    const resetScopeOptions = RESET_SOURCES.map((source, index) => {
+      const row = Group(610, 275 + index * 92, 700, 76, [
+        this.resetScopeBackgrounds[index] = Box(0, 0, 700, 76)
+          .stroke(BtnBorder)
+          .radius(9),
+        this.resetScopeMarkers[index] = Txt(24, 0, 54, 76)
+          .font(UIFont.size(28))
+          .color(White)
+          .align(CENTER),
+        this.resetScopeLabels[index] = Txt(92, 4, 570, 32)
+          .font(UIFont.size(25))
+          .color(White),
+        this.resetScopeDetails[index] = Txt(92, 40, 570, 25)
+          .font(UIFont.size(16))
+          .color(Gray)
+          .noOverflow(),
+      ])
+      row.el.setAttribute('role', 'radio')
+      row.el.style.cursor = 'pointer'
+      row.el.addEventListener('click', () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', {
+          key: String(index + 1),
+          code: POINTER_APPLY_CODE,
+        }))
+      })
+      this.resetScopeRows.push(row)
       return row
     })
     this.create(100, [
@@ -229,7 +292,7 @@ export default class MenuScreen extends Screen {
       this.songs_list_container = Box(1300, 0, 620, 1080).layer(110),
 
       // Sorting applies to whichever collection is currently open, including
-      // nested QQ Music collections.
+      // nested music-service collections.
       this.sort_button = Group(1335, 75, 550, 58, [
         Box(0, 0, 550, 58).fill(UIColor).stroke(BtnBorder).radius(8),
         this.sort_label = Txt(12, 0, 526, 58)
@@ -238,99 +301,92 @@ export default class MenuScreen extends Screen {
           .align(CENTER)
           .noOverflow(),
       ]).layer(130),
-      this.sort_hint = Txt(1335, 140, 550, 26)
-        .font(UIFont.size(16))
-        .color(Gray)
-        .align(CENTER)
-        .noOverflow()
-        .layer(130),
+
+      this.dedupe_button = Group(1335, 145, 550, 58, [
+        Box(0, 0, 550, 58).fill(UIColor).stroke(BtnBorder).radius(8),
+        this.dedupe_label = Txt(12, 0, 526, 58)
+          .font(UIFont.size(22))
+          .color(White)
+          .align(CENTER)
+          .noOverflow(),
+      ]).layer(130),
 
       // Music import source selection
-      this.import_music_button = Group(30, 900, 220, 72, [
-        Box(0, 0, 220, 72).fill(UIColor).stroke(BtnBorder).radius(8),
-        this.import_music_label = Txt(10, 0, 200, 72).font(UIFont.size(18)).color(White).align(CENTER).noOverflow(),
+      this.import_music_button = Group(30, 930, 175, 80, [
+        Box(0, 0, 175, 80).fill(UIColor).stroke(BtnBorder).radius(8),
+        this.import_music_label = Txt(8, 0, 159, 80).font(UIFont.size(16)).color(White).align(CENTER).noOverflow(),
       ]).layer(130),
-      this.import_music_hint = Txt(30, 980, 220, 28)
-        .font(UIFont.size(14))
-        .color(Gray)
-        .noOverflow()
-        .layer(130),
 
       // Multi-select editor for locally managed song packages
-      this.editLibraryButton = Group(270, 900, 220, 72, [
-        Box(0, 0, 220, 72).fill(UIColor).stroke(BtnBorder).radius(8),
-        this.editLibraryLabel = Txt(10, 0, 200, 72)
-          .font(UIFont.size(18))
+      this.editLibraryButton = Group(215, 930, 175, 80, [
+        Box(0, 0, 175, 80).fill(UIColor).stroke(BtnBorder).radius(8),
+        this.editLibraryLabel = Txt(8, 0, 159, 80)
+          .font(UIFont.size(16))
           .color(White)
           .align(CENTER)
           .noOverflow(),
       ]).layer(130),
-      this.editLibraryHint = Txt(270, 980, 220, 28)
-        .font(UIFont.size(14))
-        .color(Gray)
-        .noOverflow()
-        .layer(130),
 
       // Restore the verified starter library and remove every added song
-      this.reset_library_button = Group(510, 900, 220, 72, [
-        Box(0, 0, 220, 72).fill(UIColor).stroke(BtnBorder).radius(8),
-        this.reset_library_label = Txt(10, 0, 200, 72).font(UIFont.size(17)).color(White).align(CENTER).noOverflow(),
+      this.reset_library_button = Group(400, 930, 175, 80, [
+        Box(0, 0, 175, 80).fill(UIColor).stroke(BtnBorder).radius(8),
+        this.reset_library_label = Txt(8, 0, 159, 80).font(UIFont.size(16)).color(White).align(CENTER).noOverflow(),
       ]).layer(130),
-      this.reset_library_hint = Txt(510, 980, 220, 28)
-        .font(UIFont.size(14))
-        .color(Gray)
-        .noOverflow()
-        .layer(130),
+
+      // Safe, user-triggered metadata, direct-work, poster, and cover refresh.
+      this.metadata_refresh_button = Group(585, 930, 175, 80, [
+        Box(0, 0, 175, 80).fill(UIColor).stroke(BtnBorder).radius(8),
+        this.metadata_refresh_label = Txt(8, 0, 159, 80)
+          .font(UIFont.size(16))
+          .color(White)
+          .align(CENTER)
+          .noOverflow(),
+      ]).layer(130),
 
       // Optional falling-key feedback
-      this.key_effects_button = Group(750, 900, 150, 72, [
-        this.key_effects_background = Box(0, 0, 150, 72)
+      this.key_effects_button = Group(770, 930, 120, 80, [
+        this.key_effects_background = Box(0, 0, 120, 80)
           .fill(UIColor)
           .stroke(BtnBorder)
           .radius(8),
-        this.key_effects_label = Txt(8, 0, 134, 72)
-          .font(UIFont.size(16))
+        this.key_effects_label = Txt(6, 0, 108, 80)
+          .font(UIFont.size(12))
           .color(White)
           .align(CENTER)
           .noOverflow(),
       ]).layer(130),
-      this.key_effects_hint = Txt(740, 980, 170, 28)
-        .font(UIFont.size(13))
-        .color(Gray)
-        .align(CENTER)
-        .noOverflow()
-        .layer(130),
 
       // Human-paced perfect-play demonstration
-      this.demo_mode_button = Group(920, 900, 150, 72, [
-        this.demo_mode_background = Box(0, 0, 150, 72)
+      this.demo_mode_button = Group(900, 930, 120, 80, [
+        this.demo_mode_background = Box(0, 0, 120, 80)
           .fill(UIColor)
           .stroke(BtnBorder)
           .radius(8),
-        this.demo_mode_label = Txt(8, 0, 134, 72)
-          .font(UIFont.size(16))
+        this.demo_mode_label = Txt(6, 0, 108, 80)
+          .font(UIFont.size(12))
           .color(White)
           .align(CENTER)
           .noOverflow(),
       ]).layer(130),
-      this.demo_mode_hint = Txt(910, 980, 170, 28)
-        .font(UIFont.size(13))
-        .color(Gray)
-        .align(CENTER)
-        .noOverflow()
-        .layer(130),
+
+      // Optional, strictly verified cached music video
+      this.music_video_button = Group(1030, 930, 120, 80, [
+        this.music_video_background = Box(0, 0, 120, 80)
+          .fill(UIColor)
+          .stroke(BtnBorder)
+          .radius(8),
+        this.music_video_label = Txt(6, 0, 108, 80)
+          .font(UIFont.size(12))
+          .color(White)
+          .align(CENTER)
+          .noOverflow(),
+      ]).layer(130),
 
       // Interface language action
-      this.language_button = Group(1090, 900, 150, 72, [
-        Box(0, 0, 150, 72).fill(UIColor).stroke(BtnBorder).radius(8),
-        this.language_label = Txt(8, 0, 134, 72).font(UIFont.size(16)).color(White).align(CENTER).noOverflow(),
+      this.language_button = Group(1160, 930, 120, 80, [
+        Box(0, 0, 120, 80).fill(UIColor).stroke(BtnBorder).radius(8),
+        this.language_label = Txt(6, 0, 108, 80).font(UIFont.size(12)).color(White).align(CENTER).noOverflow(),
       ]).layer(130),
-      this.language_hint = Txt(1080, 980, 170, 28)
-        .font(UIFont.size(13))
-        .color(Gray)
-        .align(CENTER)
-        .noOverflow()
-        .layer(130),
 
       // Project credits, kept clear of the top-left volume controls.
       this.about_button = Group(1200, 10, 190, 40, [
@@ -364,26 +420,81 @@ export default class MenuScreen extends Screen {
           .align(CENTER),
       ]).layer(300).hide(),
 
-      // Import provider selection dialog. Only QQ Music is implemented in
-      // this version; future providers can use the same controller contract.
+      // Import provider selection dialog. Every row uses the same provider
+      // controller contract and reports progress through one shared panel.
       this.importSourceDialog = Group(0, 0, 1920, 1080, [
         this.importSourceOverlay = Box(0, 0, 1920, 1080).fill(Black),
-        Box(510, 205, 900, 670).fill(UIColor).stroke(BtnBorder).radius(12),
-        this.importSourceTitle = Txt(580, 250, 760, 58)
+        Box(510, 155, 900, 790).fill(UIColor).stroke(BtnBorder).radius(12),
+        this.importSourceTitle = Txt(580, 205, 760, 58)
           .font(UIFont.size(40))
           .color(White)
           .align(CENTER),
         ...importSourceOptions,
-        this.importSourceNotice = Txt(590, 670, 740, 58)
+        this.importSourceNotice = Txt(590, 715, 740, 58)
           .font(UIFont.size(21).line(28))
           .color(Gray)
           .align(CENTER)
           .wrap(),
-        this.importSourceHint = Txt(590, 770, 740, 34)
+        this.importSourceHint = Txt(590, 830, 740, 34)
           .font(UIFont.size(20))
           .color(Gray)
           .align(CENTER),
       ]).layer(303).hide(),
+
+      // Native import-size stepper. This keeps the complete import flow in
+      // the game UI instead of switching to a browser prompt.
+      this.importBatchDialog = Group(0, 0, 1920, 1080, [
+        this.importBatchOverlay = Box(0, 0, 1920, 1080).fill(Black),
+        Box(610, 225, 700, 625).fill(UIColor).stroke(BtnBorder).radius(16),
+        this.importBatchTitle = Txt(670, 275, 580, 58)
+          .font(UIFont.size(40))
+          .color(White)
+          .align(CENTER),
+        this.importBatchProvider = Txt(680, 345, 560, 38)
+          .font(UIFont.size(22))
+          .color(Gray)
+          .align(CENTER)
+          .noOverflow(),
+        this.importBatchValue = Txt(710, 405, 500, 125)
+          .font(NumberFont.size(104))
+          .color(White)
+          .align(CENTER),
+        this.importBatchMinusTen = Group(680, 555, 125, 64, [
+          Box(0, 0, 125, 64).fill(Black).stroke(BtnBorder).radius(8),
+          Txt(8, 0, 109, 64).text('−10')
+            .font(UIFont.size(27)).color(White).align(CENTER),
+        ]),
+        this.importBatchMinusOne = Group(825, 555, 125, 64, [
+          Box(0, 0, 125, 64).fill(Black).stroke(BtnBorder).radius(8),
+          Txt(8, 0, 109, 64).text('−1')
+            .font(UIFont.size(27)).color(White).align(CENTER),
+        ]),
+        this.importBatchPlusOne = Group(970, 555, 125, 64, [
+          Box(0, 0, 125, 64).fill(Black).stroke(BtnBorder).radius(8),
+          Txt(8, 0, 109, 64).text('+1')
+            .font(UIFont.size(27)).color(White).align(CENTER),
+        ]),
+        this.importBatchPlusTen = Group(1115, 555, 125, 64, [
+          Box(0, 0, 125, 64).fill(Black).stroke(BtnBorder).radius(8),
+          Txt(8, 0, 109, 64).text('+10')
+            .font(UIFont.size(27)).color(White).align(CENTER),
+        ]),
+        this.importBatchConfirm = Group(690, 660, 245, 70, [
+          Box(0, 0, 245, 70).fill(UIColor).stroke(BtnBorder).radius(10),
+          this.importBatchConfirmLabel = Txt(12, 0, 221, 70)
+            .font(UIFont.size(26)).color(White).align(CENTER),
+        ]),
+        this.importBatchCancel = Group(985, 660, 245, 70, [
+          Box(0, 0, 245, 70).fill(Black).stroke(BtnBorder).radius(10),
+          this.importBatchCancelLabel = Txt(12, 0, 221, 70)
+            .font(UIFont.size(26)).color(White).align(CENTER),
+        ]),
+        this.importBatchHint = Txt(665, 770, 590, 36)
+          .font(UIFont.size(18))
+          .color(Gray)
+          .align(CENTER)
+          .noOverflow(),
+      ]).layer(304).hide(),
 
       // Collection sorting dialog
       this.sort_dialog = Group(0, 0, 1920, 1080, [
@@ -458,6 +569,21 @@ export default class MenuScreen extends Screen {
           .align(CENTER),
       ]).layer(308).hide(),
 
+      // Choose between a full reset and one import source.
+      this.resetScopeDialog = Group(0, 0, 1920, 1080, [
+        this.resetScopeOverlay = Box(0, 0, 1920, 1080).fill(Black),
+        Box(510, 155, 900, 790).fill(UIColor).stroke(BtnBorder).radius(12),
+        this.resetScopeTitle = Txt(580, 205, 760, 58)
+          .font(UIFont.size(40))
+          .color(White)
+          .align(CENTER),
+        ...resetScopeOptions,
+        this.resetScopeHint = Txt(590, 810, 740, 42)
+          .font(UIFont.size(20))
+          .color(Gray)
+          .align(CENTER),
+      ]).layer(309).hide(),
+
       // Compact second-confirmation dialog for restoring the starter library
       this.reset_dialog = Group(0, 0, 1920, 1080, [
         this.reset_overlay = Box(0, 0, 1920, 1080).fill(Black),
@@ -515,6 +641,11 @@ export default class MenuScreen extends Screen {
     this.reset_library_button.el.addEventListener('click', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd' }))
     })
+    this.metadata_refresh_button.el.style.cursor = 'pointer'
+    this.metadata_refresh_button.el.setAttribute('role', 'button')
+    this.metadata_refresh_button.el.addEventListener('click', () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'u' }))
+    })
     this.key_effects_button.el.style.cursor = 'pointer'
     this.key_effects_button.el.setAttribute('role', 'button')
     this.key_effects_button.el.addEventListener('click', () => {
@@ -524,6 +655,11 @@ export default class MenuScreen extends Screen {
     this.demo_mode_button.el.setAttribute('role', 'button')
     this.demo_mode_button.el.addEventListener('click', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm' }))
+    })
+    this.music_video_button.el.style.cursor = 'pointer'
+    this.music_video_button.el.setAttribute('role', 'button')
+    this.music_video_button.el.addEventListener('click', () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v' }))
     })
     this.language_button.el.style.cursor = 'pointer'
     this.language_button.el.setAttribute('role', 'button')
@@ -540,6 +676,11 @@ export default class MenuScreen extends Screen {
     this.sort_button.el.addEventListener('click', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 's' }))
     })
+    this.dedupe_button.el.style.cursor = 'pointer'
+    this.dedupe_button.el.setAttribute('role', 'button')
+    this.dedupe_button.el.addEventListener('click', () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g' }))
+    })
     this.language_overlay.el.style.opacity = '0.72'
     this.language_overlay.el.style.cursor = 'pointer'
     this.language_overlay.el.addEventListener('click', () => {
@@ -554,6 +695,28 @@ export default class MenuScreen extends Screen {
     })
     this.importSourceDialog.el.setAttribute('role', 'dialog')
     this.importSourceDialog.el.setAttribute('aria-modal', 'true')
+    this.importBatchOverlay.el.style.opacity = '0.72'
+    this.importBatchOverlay.el.style.cursor = 'pointer'
+    this.importBatchOverlay.el.addEventListener('click', () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    })
+    this.importBatchDialog.el.setAttribute('role', 'dialog')
+    this.importBatchDialog.el.setAttribute('aria-modal', 'true')
+    const batchActions = [
+      [this.importBatchMinusTen, 'PageDown'],
+      [this.importBatchMinusOne, 'ArrowDown'],
+      [this.importBatchPlusOne, 'ArrowUp'],
+      [this.importBatchPlusTen, 'PageUp'],
+      [this.importBatchConfirm, 'Enter'],
+      [this.importBatchCancel, 'Escape'],
+    ]
+    for (const [element, key] of batchActions) {
+      element.el.style.cursor = 'pointer'
+      element.el.setAttribute('role', 'button')
+      element.el.addEventListener('click', () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key }))
+      })
+    }
     this.sort_overlay.el.style.opacity = '0.72'
     this.sort_overlay.el.style.cursor = 'pointer'
     this.sort_overlay.el.addEventListener('click', () => {
@@ -580,19 +743,21 @@ export default class MenuScreen extends Screen {
       window.open(PROJECT_URL, '_blank', 'noopener,noreferrer')
     })
     this.about_credits_container.el.style.overflowY = 'auto'
-    this.about_credits_container.el.style.paddingRight = '8px'
+    this.about_credits_container.el.style.padding = '10px 12px'
+    this.about_credits_container.el.style.boxSizing = 'border-box'
+    this.about_credits_container.el.style.background = 'rgba(7, 12, 20, .38)'
+    this.about_credits_container.el.style.borderRadius = '8px'
+    this.about_credits_container.el.style.isolation = 'isolate'
+    this.about_credits_container.el.style.zIndex = '2'
+    this.about_credits_container.el.style.transform = 'translateZ(0)'
     this.about_credits_container.el.setAttribute('tabindex', '0')
-    for (const hint of [
-      this.import_music_hint,
-      this.editLibraryHint,
-      this.reset_library_hint,
-      this.key_effects_hint,
-      this.demo_mode_hint,
-      this.language_hint,
-    ]) {
-      hint.el.style.textShadow = MENU_HINT_SHADOW
-      hint.el.style.webkitTextStroke = '.35px rgba(8, 12, 20, .9)'
-    }
+    this.resetScopeOverlay.el.style.opacity = '0.72'
+    this.resetScopeOverlay.el.style.cursor = 'pointer'
+    this.resetScopeOverlay.el.addEventListener('click', () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    })
+    this.resetScopeDialog.el.setAttribute('role', 'dialog')
+    this.resetScopeDialog.el.setAttribute('aria-modal', 'true')
     this.reset_overlay.el.style.opacity = '0.72'
     this.reset_overlay.el.style.cursor = 'pointer'
     this.reset_overlay.el.addEventListener('click', () => {
@@ -630,6 +795,8 @@ export default class MenuScreen extends Screen {
     for (const group of ABOUT_CREDIT_GROUPS) {
       const row = document.createElement('section')
       row.style.marginBottom = '13px'
+      row.style.position = 'relative'
+      row.style.zIndex = '1'
 
       const description = document.createElement('div')
       description.textContent = this.i18n.t(group.key)
@@ -637,12 +804,15 @@ export default class MenuScreen extends Screen {
       description.style.fontFamily = 'Open Sans, sans-serif'
       description.style.fontSize = '16px'
       description.style.lineHeight = '23px'
+      description.style.whiteSpace = 'normal'
       row.appendChild(description)
 
       const links = document.createElement('div')
       links.style.display = 'flex'
       links.style.flexWrap = 'wrap'
       links.style.gap = '4px 13px'
+      links.style.position = 'relative'
+      links.style.zIndex = '1'
       for (const [label, url] of group.links) {
         const link = document.createElement('a')
         link.textContent = label
@@ -662,45 +832,35 @@ export default class MenuScreen extends Screen {
 
   setLocale () {
     const t = this.i18n.t.bind(this.i18n)
+    const withKey = (label, key) => t('common.labelWithKey', {
+      label,
+      key,
+    })
     this.select_key.text(t('key.space'))
     this.select_label.text(t('common.select'))
     this.parent_key.text(`${t('key.escape')} / ${t('key.backspace')}`)
     this.parent_label.text(t('common.goParent'))
     this.empty_text.text(t('common.empty'))
-    this.import_music_label.text(t('menu.importMusic'))
-    this.import_music_button.el.setAttribute('aria-label', t('menu.importMusic'))
-    this.editLibraryLabel.text(t('menu.editLibrary'))
-    this.editLibraryHint.text(t('menu.editLibraryHint'))
-    this.editLibraryButton.el.setAttribute(
-      'aria-label',
-      t('common.labelWithHint', {
-        label: t('menu.editLibrary'),
-        hint: t('menu.editLibraryHint'),
-      }),
-    )
-    this.reset_library_label.text(t('menu.resetLibrary'))
-    this.reset_library_hint.text(t('menu.resetLibraryHint'))
-    this.reset_library_button.el.setAttribute(
-      'aria-label',
-      t('common.labelWithHint', {
-        label: t('menu.resetLibrary'),
-        hint: t('menu.resetLibraryHint'),
-      }),
-    )
+    const importLabel = withKey(t('menu.importMusic'), 'Q')
+    this.import_music_label.text(importLabel)
+    this.import_music_button.el.setAttribute('aria-label', importLabel)
+    const editLabel = withKey(t('menu.editLibrary'), 'E')
+    this.editLibraryLabel.text(editLabel)
+    this.editLibraryButton.el.setAttribute('aria-label', editLabel)
+    const resetLabel = withKey(t('menu.resetLibrary'), 'D')
+    this.reset_library_label.text(resetLabel)
+    this.reset_library_button.el.setAttribute('aria-label', resetLabel)
+    const metadataLabel = withKey(t('menu.refreshMetadata'), 'U')
+    this.metadata_refresh_label.text(metadataLabel)
+    this.metadata_refresh_button.el.setAttribute('aria-label', metadataLabel)
     const keyEffectsLabel = t('menu.keyEffects', {
       state: t(
         this.key_effects_enabled ? 'common.enabled' : 'common.disabled',
       ),
     })
-    this.key_effects_label.text(keyEffectsLabel)
-    this.key_effects_hint.text(t('menu.keyEffectsHint'))
-    this.key_effects_button.el.setAttribute(
-      'aria-label',
-      t('common.labelWithHint', {
-        label: keyEffectsLabel,
-        hint: t('menu.keyEffectsHint'),
-      }),
-    )
+    const keyEffectsButtonLabel = withKey(keyEffectsLabel, 'K')
+    this.key_effects_label.text(keyEffectsButtonLabel)
+    this.key_effects_button.el.setAttribute('aria-label', keyEffectsButtonLabel)
     this.key_effects_button.el.setAttribute(
       'aria-pressed',
       String(this.key_effects_enabled),
@@ -710,33 +870,37 @@ export default class MenuScreen extends Screen {
         this.demo_mode_enabled ? 'common.enabled' : 'common.disabled',
       ),
     })
-    this.demo_mode_label.text(demoModeLabel)
-    this.demo_mode_hint.text(t('menu.demoModeHint'))
-    this.demo_mode_button.el.setAttribute(
-      'aria-label',
-      t('common.labelWithHint', {
-        label: demoModeLabel,
-        hint: t('menu.demoModeHint'),
-      }),
-    )
+    const demoModeButtonLabel = withKey(demoModeLabel, 'M')
+    this.demo_mode_label.text(demoModeButtonLabel)
+    this.demo_mode_button.el.setAttribute('aria-label', demoModeButtonLabel)
     this.demo_mode_button.el.setAttribute(
       'aria-pressed',
       String(this.demo_mode_enabled),
     )
+    const musicVideoLabel = t('menu.musicVideo', {
+      state: t(
+        this.music_video_enabled ? 'common.enabled' : 'common.disabled',
+      ),
+    })
+    const musicVideoButtonLabel = withKey(musicVideoLabel, 'V')
+    this.music_video_label.text(musicVideoButtonLabel)
+    this.music_video_button.el.setAttribute(
+      'aria-label',
+      musicVideoButtonLabel,
+    )
+    this.music_video_button.el.setAttribute(
+      'aria-pressed',
+      String(this.music_video_enabled),
+    )
     const languageLabel = t('menu.language', {
       language: this.i18n.languageName(),
     })
-    this.language_label.text(languageLabel)
-    this.language_hint.text(t('menu.languageHint'))
-    this.language_button.el.setAttribute(
-      'aria-label',
-      t('common.labelWithHint', {
-        label: languageLabel,
-        hint: t('menu.languageHint'),
-      }),
-    )
-    this.about_label.text(t('menu.about'))
-    this.about_button.el.setAttribute('aria-label', t('menu.about'))
+    const languageButtonLabel = withKey(languageLabel, 'L')
+    this.language_label.text(languageButtonLabel)
+    this.language_button.el.setAttribute('aria-label', languageButtonLabel)
+    const aboutLabel = withKey(t('menu.about'), 'A')
+    this.about_label.text(aboutLabel)
+    this.about_button.el.setAttribute('aria-label', aboutLabel)
     this.about_title.text(t('about.title'))
     this.about_version.text(t('about.version', { version: APP_VERSION }))
     this.about_summary.text(t('about.summary'))
@@ -758,6 +922,14 @@ export default class MenuScreen extends Screen {
       'aria-label',
       t('import.selectTitle'),
     )
+    this.importBatchTitle.text(t('import.batchTitle'))
+    this.importBatchConfirmLabel.text(t('import.batchConfirm'))
+    this.importBatchCancelLabel.text(t('import.batchCancel'))
+    this.importBatchHint.text(t('import.batchHint', { maximum: 500 }))
+    this.importBatchDialog.el.setAttribute(
+      'aria-label',
+      t('import.batchTitle'),
+    )
     for (let index = 0; index < IMPORT_SOURCES.length; index++) {
       const source = IMPORT_SOURCES[index]
       const label = t(`import.${source}`)
@@ -769,6 +941,23 @@ export default class MenuScreen extends Screen {
         t('common.labelWithHint', { label, hint: detail }),
       )
     }
+    this.resetScopeTitle.text(t('library.reset.selectTitle'))
+    this.resetScopeHint.text(t('library.reset.selectHint'))
+    this.resetScopeDialog.el.setAttribute(
+      'aria-label',
+      t('library.reset.selectTitle'),
+    )
+    for (let index = 0; index < RESET_SOURCES.length; index++) {
+      const source = RESET_SOURCES[index]
+      const label = t(`library.reset.scope.${source}`)
+      const detail = t(`library.reset.scope.${source}Detail`)
+      this.resetScopeLabels[index].text(label)
+      this.resetScopeDetails[index].text(detail)
+      this.resetScopeRows[index].el.setAttribute(
+        'aria-label',
+        t('common.labelWithHint', { label, hint: detail }),
+      )
+    }
     for (let index = 0; index < SONG_SORT_MODES.length; index++) {
       const label = t(`sort.mode.${SONG_SORT_MODES[index]}`)
       this.sort_option_labels[index].text(label)
@@ -776,7 +965,9 @@ export default class MenuScreen extends Screen {
     }
     this.sort_dialog_title.text(t('sort.selectTitle'))
     this.sort_dialog_hint.text(t('sort.selectHint'))
-    this.sort_hint.text(t('menu.sortHint'))
+    const dedupeLabel = withKey(t('menu.dedupe'), 'G')
+    this.dedupe_label.text(dedupeLabel)
+    this.dedupe_button.el.setAttribute('aria-label', dedupeLabel)
     this.sort_dialog.el.setAttribute('aria-label', t('sort.selectTitle'))
     this.setSortState(this.sort_mode, this.sort_direction)
     this.setSortDirection(this.sort_direction)
@@ -794,7 +985,6 @@ export default class MenuScreen extends Screen {
       'aria-label',
       t('library.reset.cancelAction'),
     )
-    this.import_music_hint.text(t(this.importHintKey, this.importHintValues))
     this.libraryEditorDialog.setLocale()
     this.updateGameMode(this.current_mode)
   }
@@ -804,6 +994,15 @@ export default class MenuScreen extends Screen {
     this.key_effects_background.el.style.backgroundColor =
       this.key_effects_enabled
         ? 'rgba(31, 139, 92, 0.78)'
+        : 'rgba(70, 70, 70, 0.78)'
+    this.setLocale()
+  }
+
+  setMusicVideoEnabled (enabled) {
+    this.music_video_enabled = Boolean(enabled)
+    this.music_video_background.el.style.backgroundColor =
+      this.music_video_enabled
+        ? 'rgba(31, 112, 166, 0.82)'
         : 'rgba(70, 70, 70, 0.78)'
     this.setLocale()
   }
@@ -843,9 +1042,46 @@ export default class MenuScreen extends Screen {
     this.importSourceDialog.hide()
   }
 
-  showLibraryEditor (songs) {
+  setImportBatchValue (value) {
+    this.import_batch_value = Math.max(
+      1,
+      Math.min(500, Math.round(Number(value) || 1)),
+    )
+    this.importBatchValue.text(String(this.import_batch_value))
+    this.importBatchValue.el.setAttribute(
+      'aria-label',
+      this.i18n.t('import.batchCount', {
+        count: this.import_batch_value,
+      }),
+    )
+  }
+
+  showImportBatchMenu (value, providerLabel) {
     this.dialogOpen = true
-    this.libraryEditorDialog.show(songs)
+    this.importBatchProvider.text(providerLabel)
+    this.setImportBatchValue(value)
+    this.importBatchDialog.show()
+  }
+
+  hideImportBatchMenu () {
+    this.dialogOpen = false
+    this.importBatchDialog.hide()
+  }
+
+  showResetScopeMenu (selectedIndex = 0) {
+    this.dialogOpen = true
+    this.setResetScopeSelection(selectedIndex)
+    this.resetScopeDialog.show()
+  }
+
+  hideResetScopeMenu () {
+    this.dialogOpen = false
+    this.resetScopeDialog.hide()
+  }
+
+  showLibraryEditor (songs, options = {}) {
+    this.dialogOpen = true
+    this.libraryEditorDialog.show(songs, options)
   }
 
   hideLibraryEditor () {
@@ -886,6 +1122,23 @@ export default class MenuScreen extends Screen {
     }
   }
 
+  setResetScopeSelection (index) {
+    const safeIndex = Math.max(0, Math.min(
+      this.resetScopeRows.length - 1,
+      index,
+    ))
+    for (let position = 0; position < this.resetScopeRows.length; position++) {
+      const selected = position === safeIndex
+      this.resetScopeBackgrounds[position].el.style.backgroundColor =
+        selected ? 'rgba(255,255,255,0.24)' : 'rgba(70,70,70,0.88)'
+      this.resetScopeMarkers[position].text(selected ? '✓' : '')
+      this.resetScopeRows[position].el.setAttribute(
+        'aria-checked',
+        String(selected),
+      )
+    }
+  }
+
   setImportSourceNotice (key = '') {
     this.importSourceNotice.text(key ? this.i18n.t(key) : '')
   }
@@ -915,8 +1168,18 @@ export default class MenuScreen extends Screen {
     this.about_dialog.hide()
   }
 
-  showResetMenu () {
+  showResetMenu (scope) {
     this.dialogOpen = true
+    const label = this.i18n.t(scope?.labelKey || 'library.reset.scope.all')
+    this.reset_dialog_title.text(this.i18n.t('library.reset.confirmTitle', {
+      source: label,
+    }))
+    this.reset_dialog_detail.text(this.i18n.t(
+      scope?.id === 'all'
+        ? 'library.reset.confirmDetailAll'
+        : 'library.reset.confirmDetailSource',
+      { source: label },
+    ))
     this.reset_dialog.show()
   }
 
@@ -981,20 +1244,12 @@ export default class MenuScreen extends Screen {
       field: this.i18n.t(`sort.mode.${this.sort_mode}`),
       arrow: this.sort_direction === 'asc' ? '↑' : '↓',
     })
-    this.sort_label.text(label)
-    this.sort_button.el.setAttribute(
-      'aria-label',
-      this.i18n.t('common.labelWithHint', {
-        label,
-        hint: this.i18n.t('menu.sortHint'),
-      }),
-    )
-  }
-
-  setImportHint (key, values = {}) {
-    this.importHintKey = key
-    this.importHintValues = values
-    this.import_music_hint.text(this.i18n.t(key, values))
+    const buttonLabel = this.i18n.t('common.labelWithKey', {
+      label,
+      key: 'S',
+    })
+    this.sort_label.text(buttonLabel)
+    this.sort_button.el.setAttribute('aria-label', buttonLabel)
   }
 
   setSongList (collection) {
@@ -1024,7 +1279,6 @@ export default class MenuScreen extends Screen {
           Txt(-40, 28, 30, 30).fill(Gray).radius(5),
         ])
       } else {
-        const color = c.media_type === 'youtube' ? BadgeYouTube : c.media_type === 'video' ? BadgeVideo : BadgeAudio
         group = Group(0, position * 100, 620, 100, [
           Txt(0, 24, 440, 36).text(displaySongTitle(c, this.i18n.locale)).font(SongFont.size(36)).color(White).noOverflow(),
           Txt(0, 0, 440, 18).text(c.artist).font(SongFont.size(22)).color(White).noOverflow(),
@@ -1034,7 +1288,11 @@ export default class MenuScreen extends Screen {
             .color(Gray)
             .align(CENTER)
             .noOverflow(),
-          Txt(-40, 28, 30, 30).text(c.language.toUpperCase()).font(UIFont.size(18)).align(CENTER).color(White).fill(color).radius(5),
+          Txt(-40, 22, 30, 40)
+            .text('•')
+            .font(UIFont.size(24))
+            .align(CENTER)
+            .color(White),
         ])
       }
 
@@ -1083,17 +1341,18 @@ export default class MenuScreen extends Screen {
         this.demo_mode_enabled ? 'common.enabled' : 'common.disabled',
       ),
     })
-    this.demo_mode_label.text(demoModeLabel)
+    const buttonLabel = this.i18n.t('common.labelWithKey', {
+      label: demoModeLabel,
+      key: 'M',
+    })
+    this.demo_mode_label.text(buttonLabel)
     this.demo_mode_button.el.setAttribute(
       'aria-pressed',
       String(this.demo_mode_enabled),
     )
     this.demo_mode_button.el.setAttribute(
       'aria-label',
-      this.i18n.t('common.labelWithHint', {
-        label: demoModeLabel,
-        hint: this.i18n.t('menu.demoModeHint'),
-      }),
+      buttonLabel,
     )
   }
 }

@@ -129,6 +129,12 @@ export default class BackgroundScreen extends Screen {
     this.song_album_frame.hide()
   }
 
+  hideSongPoster () {
+    this.backgroundRequest++
+    this.song_background.hide()
+    if (this.currentAlbumUrl) this.song_album_frame.show()
+  }
+
   showMenuUI (show) {
     this.setAlbumLayout(show)
     if (show) {

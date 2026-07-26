@@ -30,6 +30,10 @@ const TEXT_EXTENSIONS = new Set([
 ])
 const PRIVATE_CONTENT_PATTERNS = [
   {
+    name: 'AWS access key ID',
+    pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/u,
+  },
+  {
     name: 'absolute Windows user profile path',
     pattern: /[A-Za-z]:\\Users\\[^\\\s"'<>]+/u,
   },
@@ -49,6 +53,14 @@ const PRIVATE_CONTENT_PATTERNS = [
     name: 'persisted QQ Music account identifier',
     pattern: /\bqqmusic_uin=\d{5,}\b/u,
   },
+  {
+    name: 'persisted Apple Music media user token',
+    pattern: /\bmedia-user-token\b[\t =:]+[A-Za-z0-9._-]{20,}/u,
+  },
+  {
+    name: 'persisted NetEase Cloud Music session',
+    pattern: /\bMUSIC_U[\t =:]+[A-Za-z0-9._-]{20,}/u,
+  },
 ]
 
 function privatePathReason (filename) {
@@ -59,7 +71,21 @@ function privatePathReason (filename) {
   if (lower.includes('/qqmusiccache/') || lower.startsWith('qqmusiccache/')) {
     return 'QQMusicCache content'
   }
-  if (/\.(?:mflac|mmp4|qrc|ekey)$/iu.test(value)) {
+  if (
+    /^(?:qqmusicdownloads?|qqmusic)\//u.test(lower) ||
+    /\/(?:qqmusicdownloads?|qqmusic)\//u.test(lower)
+  ) {
+    return 'QQ Music download content'
+  }
+  if (
+    lower.includes('/netease/cloudmusic/') ||
+    lower.startsWith('netease/cloudmusic/') ||
+    /^(?:neteasecloudmusic|cloudmusic|网易云音乐)\//u.test(lower) ||
+    lower.includes('/apple-music/cookies')
+  ) {
+    return 'private music-service content'
+  }
+  if (/\.(?:mflac|mmp4|qrc|ekey|ncm|uc!?)$/iu.test(value)) {
     return 'private music cache resource'
   }
   if (/^ref\d+\.(?:png|jpe?g|webp)$/iu.test(value)) {

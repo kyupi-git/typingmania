@@ -83,26 +83,66 @@ test('the sort direction remains an independent toggle', async () => {
   expect(game.preferences.setSongSort).toHaveBeenCalledWith('added', 'desc')
 })
 
-test('the import source menu launches QQ Music and keeps planned sources inert', async () => {
+test('the import source menu launches each implemented provider', async () => {
   const qqGame = makeGame([{
     key: '1',
     code: POINTER_APPLY_CODE,
   }])
   const qqController = new MenuController(qqGame)
-  qqController.importFromQQMusic = jest.fn()
+  qqController.importFromMusicProvider = jest.fn()
   await qqController.selectImportSource()
-  expect(qqController.importFromQQMusic).toHaveBeenCalled()
+  expect(qqController.importFromMusicProvider).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'qqmusic' }),
+  )
 
-  const otherGame = makeGame([
-    { key: '2', code: 'Digit2' },
+  const neteaseGame = makeGame([{ key: '2', code: POINTER_APPLY_CODE }])
+  const neteaseController = new MenuController(neteaseGame)
+  neteaseController.importFromMusicProvider = jest.fn()
+  await neteaseController.selectImportSource()
+  expect(neteaseController.importFromMusicProvider).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'netease' }),
+  )
+  expect(neteaseGame.background_screen.showSongBackground)
+    .toHaveBeenCalledWith(
+      'assets/provider-art/netease.svg',
+      '',
+      { preferUpperPortrait: false },
+    )
+})
+
+test('the import source background follows keyboard selection and restores', async () => {
+  const game = makeGame([
+    { key: 'ArrowDown', code: 'ArrowDown' },
     { key: 'Escape', code: 'Escape' },
   ])
-  const otherController = new MenuController(otherGame)
-  otherController.importFromQQMusic = jest.fn()
-  await otherController.selectImportSource()
-  expect(otherController.importFromQQMusic).not.toHaveBeenCalled()
-  expect(otherGame.menu_screen.setImportSourceNotice)
-    .toHaveBeenCalledWith('import.comingSoonDetail')
+  const selected = {
+    preview_image_url: '/selected-poster.jpg',
+    preview_image_is_poster: true,
+  }
+  const controller = new MenuController(game)
+  controller.current_collection = { parent: null, children: [selected] }
+
+  await controller.selectImportSource()
+
+  expect(game.background_screen.showSongBackground)
+    .toHaveBeenNthCalledWith(
+      1,
+      'assets/provider-art/qqmusic.svg',
+      '',
+      { preferUpperPortrait: false },
+    )
+  expect(game.background_screen.showSongBackground)
+    .toHaveBeenNthCalledWith(
+      2,
+      'assets/provider-art/netease.svg',
+      '',
+      { preferUpperPortrait: false },
+    )
+  expect(game.background_screen.showSongBackground).toHaveBeenLastCalledWith(
+    '/selected-poster.jpg',
+    '',
+    { preferUpperPortrait: true },
+  )
 })
 
 test('song selection previews the work poster with an upper portrait focus', () => {
@@ -148,6 +188,44 @@ test('about dialog closes with Backspace', async () => {
   expect(game.menu_screen.showAbout).toHaveBeenCalled()
   expect(game.menu_screen.hideAbout).toHaveBeenCalled()
   expect(game.sfx.play).toHaveBeenCalledWith('exit')
+})
+
+test('Escape cancels metadata refresh even while the local session is opening', async () => {
+  const game = makeGame([])
+  let resolveSession
+  const session = new Promise(resolve => {
+    resolveSession = resolve
+  })
+  const controller = new MenuController(game)
+  controller.localLibrarySession = jest.fn(() => session)
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = jest.fn(async () => ({
+    ok: true,
+    json: async () => [],
+  }))
+  try {
+    const refresh = controller.refreshLibraryMetadata()
+    await Promise.resolve()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    resolveSession({
+      local: { token: 'test-token' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-TMN-Token': 'test-token',
+      },
+    })
+    await refresh
+
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      '/api/library/metadata-refresh',
+      expect.anything(),
+    )
+    expect(game.input.waitForAnyKey).not.toHaveBeenCalled()
+    expect(game.loading_screen.setMainText)
+      .toHaveBeenCalledWith('metadata.refresh.cancelled')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('library editor deletes only the selected song and refreshes the index', async () => {

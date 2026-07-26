@@ -5,7 +5,10 @@ import * as qmcCrypto from '../../vendor/runtime/node_modules/@clamber_l/crypto/
 import { parseBuffer } from '../../vendor/runtime/node_modules/music-metadata/lib/index.js'
 
 import PackedFile from '../../src/lib/packedfile.js'
-import { SONG_ORIGIN_VERSION } from '../../src/song/song-origin.js'
+import {
+  parseSongOrigin,
+  SONG_ORIGIN_VERSION,
+} from '../../src/song/song-origin.js'
 import { PACE_METADATA_VERSION } from '../../src/util/song-meta.js'
 import {
   analyzeSongTitle,
@@ -20,7 +23,7 @@ import {
   coverSourceInfo,
   refreshPackedSongCover,
 } from './cover-package.js'
-import AnimePosterResolver from './anime-poster.js'
+import MediaPosterResolver from './media-poster.js'
 import {
   artistResolutionSourceInfo,
   refreshPackedSongArtist,
@@ -28,6 +31,8 @@ import {
 import OriginalArtistResolver, {
   ORIGINAL_ARTIST_VERSION,
 } from './original-artist.js'
+import { loadBundledFallbackCover } from './fallback-artwork.js'
+import { inferScreenOriginFromAlbum } from './imported-song-enrichment.js'
 import {
   convertQrcFiles,
   LYRIC_QUALITY_VERSION,
@@ -37,6 +42,10 @@ import {
   scanSongLibrary,
   songsAreEquivalent,
 } from './library.js'
+import {
+  mergeCatalogMetadata,
+  resolveImportedCatalogMatch,
+} from './catalog-resolver.js'
 import SongOriginResolver from './song-origin-resolver.js'
 import { refreshPackedSongOrigin } from './song-origin-package.js'
 import { needsSongOriginRefresh } from './song-origin-maintenance.js'
@@ -46,14 +55,16 @@ import {
   finishImportBatch,
   needsMoreNewSongs,
   prioritizeUnseenTracks,
+  recordImportFailure,
 } from './import-batch.js'
 import {
   compareOfficialLyrics,
   discoverQQMusicCache,
+  discoverQQMusicDownloadDirectories,
   fetchOfficialCover,
   fetchOfficialLyrics,
   fetchTrackEkey,
-  fetchTrackMetadata,
+  fetchTrackMetadataWithFallback,
   isQQMusicNetworkError,
   QQMusicImportError,
   readQQMusicSession,
@@ -67,6 +78,8 @@ import {
 } from './pronunciation.js'
 import { rankLyricsCandidates } from './qrc-candidate.js'
 import { NetworkCircuitBreaker } from './network.js'
+import { importMediaDirectorySongs } from './local-folder-importer.js'
+import { detectDecryptedAudioContainer } from './qqmusic-audio.js'
 
 function parseQrcFilename (root) {
   const parts = root.split(' - ')
@@ -109,33 +122,30 @@ export async function buildQrcCatalog (lyricsDirectory) {
     }
     groups.get(root)[kind] = path.join(lyricsDirectory, entry.name)
   }
-  return [...groups.values()].filter(group => group.main)
+  const catalog = await Promise.all(
+    [...groups.values()]
+      .filter(group => group.main)
+      .map(async group => {
+        let modifiedMs = 0
+        try {
+          modifiedMs = (await fs.stat(group.main)).mtimeMs
+        } catch {}
+        return { ...group, modifiedMs }
+      }),
+  )
+  return catalog.sort((left, right) => right.modifiedMs - left.modifiedMs)
 }
 
-async function listRecentEncryptedTracks (dutyDirectory) {
-  const entries = await fs.readdir(dutyDirectory, { withFileTypes: true })
+async function listRecentEncryptedTracks (directories) {
   const tracks = []
-  for (const entry of entries) {
-    if (!/\.mflac$/i.test(entry.name)) continue
-    const container = path.join(dutyDirectory, entry.name)
-    let filename = container
-    if (entry.isDirectory()) {
-      const expected = path.join(container, entry.name)
-      try {
-        if ((await fs.stat(expected)).isFile()) filename = expected
-        else continue
-      } catch {
-        continue
-      }
-    } else if (!entry.isFile()) {
-      continue
-    }
+  let inspected = 0
+  async function addTrack (filename) {
     try {
       const stat = await fs.stat(filename)
       const localFilename = path.basename(filename)
-      const stem = localFilename.replace(/\.mflac$/i, '')
+      const stem = localFilename.replace(/\.m(?:flac|gg)$/i, '')
       const mediaMid = /^[A-Z0-9]{4}/i.test(stem) ? stem.slice(4) : ''
-      if (!mediaMid) continue
+      if (!mediaMid) return
       tracks.push({
         filename,
         localFilename,
@@ -145,6 +155,32 @@ async function listRecentEncryptedTracks (dutyDirectory) {
         modifiedMs: stat.mtimeMs,
       })
     } catch {}
+  }
+  async function visit (directory, depth = 0) {
+    if (depth > 8 || inspected >= 100_000) return
+    let entries
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (++inspected > 100_000) break
+      const filename = path.join(directory, entry.name)
+      if (entry.isDirectory() && /\.m(?:flac|gg)$/i.test(entry.name)) {
+        const nested = path.join(filename, entry.name)
+        try {
+          if ((await fs.stat(nested)).isFile()) await addTrack(nested)
+        } catch {}
+      } else if (entry.isDirectory()) {
+        await visit(filename, depth + 1)
+      } else if (entry.isFile() && /\.m(?:flac|gg)$/i.test(entry.name)) {
+        await addTrack(filename)
+      }
+    }
+  }
+  for (const directory of Array.isArray(directories) ? directories : [directories]) {
+    await visit(directory)
   }
   tracks.sort((left, right) => right.modifiedMs - left.modifiedMs)
   const unique = new Map()
@@ -278,12 +314,12 @@ async function getVerifiedCover (metadata, catalog, cookie, policy) {
   throw new Error('no valid album cover is available')
 }
 
-function decryptFlac (encrypted, ekey, expectedBytes) {
+function decryptCachedAudio (encrypted, ekey, expectedBytes) {
   const footer = qmcCrypto.QMCFooter.parse(encrypted.subarray(Math.max(0, encrypted.length - 1024)))
   const audioSize = footer ? encrypted.length - footer.size : encrypted.length
   if (footer) footer.free()
   if (expectedBytes && audioSize !== expectedBytes) {
-    throw new Error(`cached FLAC is incomplete (${audioSize}/${expectedBytes} bytes)`)
+    throw new Error(`cached audio is incomplete (${audioSize}/${expectedBytes} bytes)`)
   }
   const audio = Buffer.from(encrypted.subarray(0, audioSize))
   const cipher = new qmcCrypto.QMC2(ekey)
@@ -292,20 +328,26 @@ function decryptFlac (encrypted, ekey, expectedBytes) {
   } finally {
     cipher.free()
   }
-  if (audio.length < 4 || audio.toString('ascii', 0, 4) !== 'fLaC') {
-    throw new Error('ekey did not decrypt the cached audio')
+  return {
+    audio,
+    container: detectDecryptedAudioContainer(audio),
   }
-  return audio
 }
 
-async function verifyFlac (audio, metadata) {
-  const parsed = await parseBuffer(audio, { mimeType: 'audio/flac', size: audio.length }, {
+async function verifyCachedAudio (audio, metadata, container) {
+  const parsed = await parseBuffer(audio, {
+    mimeType: container.mimeType,
+    size: audio.length,
+  }, {
     duration: true,
     skipCovers: true,
   })
   const duration = Number(parsed.format.duration)
-  if (!parsed.format.lossless || !duration) {
-    throw new Error('decrypted audio is not a complete lossless FLAC')
+  if (!duration) {
+    throw new Error('decrypted audio is not a complete playable stream')
+  }
+  if (duration < 30) {
+    throw new Error('decrypted audio is only a short preview')
   }
   if (metadata.duration && Math.abs(duration - metadata.duration) > 3) {
     throw new Error(`audio duration does not match metadata (${duration.toFixed(2)}s/${metadata.duration}s)`)
@@ -314,6 +356,9 @@ async function verifyFlac (audio, metadata) {
     duration,
     sampleRate: parsed.format.sampleRate,
     channels: parsed.format.numberOfChannels,
+    extension: container.extension,
+    codec: container.codec,
+    lossless: Boolean(parsed.format.lossless),
   }
 }
 
@@ -331,7 +376,7 @@ async function writeSongPackage ({
   const imageName = `cover${cover.extension}`
   const poster = posterResolution?.poster || null
   const posterName = poster ? `poster${poster.extension}` : ''
-  const audioName = 'audio.flac'
+  const audioName = `audio${audioInfo.extension}`
   const verifiedAt = new Date().toISOString()
   const titleCleanup = metadata.titleCleanup || analyzeSongTitle(
     metadata.rawTitle || metadata.title,
@@ -356,6 +401,7 @@ async function writeSongPackage ({
       service: 'qqmusic',
       song_mid: metadata.songMid,
       media_mid: metadata.mediaMid,
+      mv_id: metadata.mvId || undefined,
       imported_at: verifiedAt,
       verified_at: verifiedAt,
       origin_resolution: metadata.origin
@@ -375,8 +421,9 @@ async function writeSongPackage ({
         metadata: true,
         title_original: true,
         artist_original: Boolean(metadata.artistResolution?.resolved),
-        flac_size: true,
-        flac_decode: true,
+        audio_complete: true,
+        audio_decode: true,
+        audio_codec: audioInfo.codec,
         cover_online: cover.verifiedOnline,
         poster_online: poster?.verifiedOnline || (
           posterResolution?.checked ? false : null
@@ -414,6 +461,12 @@ async function writeSongPackage ({
             ? pronunciationVerification.officialCoverage
             : null,
         max_timing_delta_ms: lyrics.stats.maxTimingDeltaMs,
+        timing_windows_adjusted:
+          lyrics.stats.timingWindowsAdjusted || 0,
+        instrumental_gap_ms_removed:
+          lyrics.stats.instrumentalGapMsRemoved || 0,
+        typical_ms_per_key:
+          lyrics.stats.typicalMsPerKey || 0,
         official_text_replacements: lyrics.stats.officialTextReplacements,
         official_recovered_lines: lyrics.stats.officialRecoveredLines,
         official_reconciliation_confidence:
@@ -523,9 +576,10 @@ function hasCurrentArtistQuality (song) {
 
 export async function importRecentQQMusicSongs ({
   root,
-  limit = 20,
+  limit = 10,
   coverRefreshOnly = false,
   onProgress = () => {},
+  shouldCancel = () => false,
 }) {
   await qmcCrypto.ready
   const result = createImportBatchResult(limit)
@@ -534,24 +588,43 @@ export async function importRecentQQMusicSongs ({
   const session = await readQQMusicSession()
   try {
     onProgress({ phase: 'cache', message: 'Locating QQMusicCache...', ...result })
-    const cache = await discoverQQMusicCache(root, session.cachePaths)
+    let cache = null
+    let cacheError = null
+    try {
+      cache = await discoverQQMusicCache(root, session.cachePaths)
+    } catch (error) {
+      cacheError = error
+    }
+    const downloadDirectories = await discoverQQMusicDownloadDirectories(root, {
+      cachePath: cache?.path || '',
+      memoryPaths: session.cachePaths,
+    })
+    if (!cache && !downloadDirectories.length) throw cacheError
     const [tracks, qrcCatalog, coverCatalog, library] = await Promise.all([
-      listRecentEncryptedTracks(cache.duty),
-      buildQrcCatalog(cache.lyrics),
-      buildCoverCatalog(cache.path),
+      listRecentEncryptedTracks([
+        ...(cache ? [cache.duty] : []),
+        ...downloadDirectories,
+      ]),
+      cache ? buildQrcCatalog(cache.lyrics) : [],
+      cache ? buildCoverCatalog(cache.path) : [],
       scanSongLibrary(root),
     ])
     await refreshQQMusicSongTitles({
       root,
       records: library.records,
     })
-    if (!tracks.length) throw new QQMusicImportError('QQMUSIC_CACHE_EMPTY', 'No complete .mflac files were found in QQMusicCache.')
+    if (!tracks.length && !downloadDirectories.length) {
+      throw new QQMusicImportError(
+        'QQMUSIC_CACHE_EMPTY',
+        'No complete QQ Music cache or download media were found.',
+      )
+    }
 
     const selectedSongIds = new Set()
     const selectedSongs = []
     const coverPolicy = createCoverPolicy()
     const originResolver = new SongOriginResolver({ root })
-    const posterResolver = new AnimePosterResolver()
+    const posterResolver = new MediaPosterResolver()
     const artistResolver = new OriginalArtistResolver({
       root,
       cookie: session.cookie,
@@ -578,8 +651,14 @@ export async function importRecentQQMusicSongs ({
       tracks,
       existingMediaIds,
     )
+    const metadataSearchCache = new Map()
+    const metadataCandidateCache = new Map()
 
     for (const track of prioritizedTracks) {
+      if (shouldCancel()) {
+        result.cancelled = true
+        break
+      }
       if (!coverRefreshOnly && !needsMoreNewSongs(result)) break
       result.inspected++
       let metadata = null
@@ -605,8 +684,35 @@ export async function importRecentQQMusicSongs ({
           songTitle: null,
           ...result,
         })
-        metadata = await fetchTrackMetadata(track.mediaMid, session.cookie)
+        const lyricHints = [...qrcCatalog].sort((left, right) => (
+          Math.abs(Number(left.modifiedMs || 0) - track.modifiedMs) -
+          Math.abs(Number(right.modifiedMs || 0) - track.modifiedMs)
+        ))
+        metadata = await fetchTrackMetadataWithFallback(
+          track.mediaMid,
+          session.cookie,
+          {
+            hints: lyricHints,
+            searchCache: metadataSearchCache,
+            candidateCache: metadataCandidateCache,
+          },
+        )
         metadata = await artistResolver.resolveMetadata(metadata)
+        const independentCatalog = await resolveImportedCatalogMatch({
+          metadata,
+          provider: 'qqmusic',
+          qqCookie: session.cookie,
+          excludeServices: ['qqmusic'],
+        }).catch(() => null)
+        if (independentCatalog) {
+          metadata = mergeCatalogMetadata(
+            metadata,
+            independentCatalog.metadata,
+          )
+        }
+        if (!parseSongOrigin(metadata.subtitle)) {
+          metadata = inferScreenOriginFromAlbum(metadata) || metadata
+        }
         if (selectedSongIds.has(metadata.songMid)) {
           result.duplicates++
           continue
@@ -883,13 +989,15 @@ export async function importRecentQQMusicSongs ({
           songTitle: metadata.title,
           ...result,
         })
-        const cover = await getVerifiedCover(
+        let cover = await getVerifiedCover(
           metadata,
           coverCatalog,
           session.cookie,
           coverPolicy,
-        )
-        if (isAnimeThemeSong(metadata)) {
+        ).catch(() => null)
+        if (!cover) cover = await loadBundledFallbackCover(root)
+        const originHint = parseSongOrigin(metadata.subtitle)
+        if (originHint) {
           onProgress({
             phase: 'origin',
             message: progressMessage(metadata, 'Resolving original work title'),
@@ -898,9 +1006,9 @@ export async function importRecentQQMusicSongs ({
           })
           metadata.origin = await originResolver.resolve(metadata, cover)
         }
-        const posterResolution = isAnimeThemeSong(metadata)
+        const posterResolution = originHint
           ? await posterResolver.resolve(metadata.origin)
-          : { checked: true, poster: null, reason: 'not-anime-related' }
+          : { checked: true, poster: null, reason: 'origin-unresolved' }
 
         onProgress({
           phase: 'audio',
@@ -916,9 +1024,13 @@ export async function importRecentQQMusicSongs ({
         })
         const encrypted = await fs.readFile(track.filename)
         const expectedBytes = track.qualityPrefix === 'F0M0' ? metadata.expectedFlacBytes : 0
-        const audio = decryptFlac(encrypted, ekey, expectedBytes)
+        const decrypted = decryptCachedAudio(encrypted, ekey, expectedBytes)
         ekey = ''
-        const audioInfo = await verifyFlac(audio, metadata)
+        const audioInfo = await verifyCachedAudio(
+          decrypted.audio,
+          metadata,
+          decrypted.container,
+        )
 
         onProgress({
           phase: 'pack',
@@ -932,7 +1044,7 @@ export async function importRecentQQMusicSongs ({
           lyrics,
           cover,
           posterResolution,
-          audio,
+          audio: decrypted.audio,
           audioInfo,
           lyricVerification,
           pronunciationVerification,
@@ -951,13 +1063,11 @@ export async function importRecentQQMusicSongs ({
         }
         consecutiveNetworkFailures = 0
       } catch (error) {
-        result.failed++
-        if (result.failures.length < 20) {
-          result.failures.push({
-            title: metadata?.title || `cached track ${result.inspected}`,
-            reason: error.message,
-          })
-        }
+        recordImportFailure(result, {
+          error,
+          stage: 'import',
+          title: metadata?.title || `cached track ${result.inspected}`,
+        })
         onProgress({
           phase: 'skipping',
           message: progressMessage(metadata, 'Skipped unusable track'),
@@ -976,23 +1086,64 @@ export async function importRecentQQMusicSongs ({
       }
     }
 
-    finishImportBatch(result, tracks.length)
+    for (const directory of downloadDirectories) {
+      if (shouldCancel()) {
+        result.cancelled = true
+        break
+      }
+      if (!needsMoreNewSongs(result)) break
+      try {
+        const ordinary = await importMediaDirectorySongs({
+          root,
+          directory,
+          provider: 'qqmusic',
+          qqCookie: session.cookie,
+          limit: result.requested - result.imported,
+          shouldCancel,
+          onProgress: progress => onProgress({
+            ...progress,
+            imported: result.imported + Number(progress.imported || 0),
+            refreshed: result.refreshed + Number(progress.refreshed || 0),
+            skipped: result.skipped + Number(progress.skipped || 0),
+            duplicates: result.duplicates + Number(progress.duplicates || 0),
+            failed: result.failed + Number(progress.failed || 0),
+          }),
+        })
+        for (const key of [
+          'inspected', 'imported', 'refreshed', 'skipped', 'duplicates', 'failed',
+        ]) result[key] += Number(ordinary[key] || 0)
+        result.selected = result.imported
+        result.failures.push(...ordinary.failures)
+        result.failures = result.failures.slice(-5)
+        if (ordinary.cancelled) {
+          result.cancelled = true
+          break
+        }
+      } catch (error) {
+        if (isQQMusicNetworkError(error)) {
+          result.networkInterrupted = true
+          break
+        }
+      }
+    }
+
+    finishImportBatch(result, result.inspected)
     if (result.networkInterrupted) result.cacheExhausted = false
     onProgress({ phase: 'index', message: 'Refreshing song library...', ...result })
     const rebuilt = await rebuildSongIndex(root)
     result.librarySongs = rebuilt.records.length
-    result.cacheMedia = cache.mediaCount
-    result.cacheLyrics = cache.lyricCount
-    if (result.networkInterrupted && !result.imported && !result.refreshed) {
+    result.cacheMedia = Number(cache?.mediaCount || 0)
+    result.cacheLyrics = Number(cache?.lyricCount || 0)
+    result.downloadDirectories = downloadDirectories.length
+    if (
+      !result.cancelled &&
+      result.networkInterrupted &&
+      !result.imported &&
+      !result.refreshed
+    ) {
       throw new QQMusicImportError(
         'QQMUSIC_NETWORK_UNAVAILABLE',
         'QQ Music could not be reached repeatedly. Try again later.',
-      )
-    }
-    if (!result.imported && !result.refreshed && !result.skipped) {
-      throw new QQMusicImportError(
-        'QQMUSIC_NO_USABLE_TRACKS',
-        'No usable cached tracks were found. Check that FLAC and QRC downloads are complete.',
       )
     }
     return result

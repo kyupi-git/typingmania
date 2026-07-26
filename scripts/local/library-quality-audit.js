@@ -23,6 +23,7 @@ import {
 import {
   looksLocalizedArtistName,
 } from './original-artist.js'
+import { normalizeLyricTimingWindows } from './timed-lyrics.js'
 
 const romanizer = new Romanizer(latinTable)
 const VALID_LANGUAGES = new Set(['EN', 'JA', 'JP', 'ZH', 'U'])
@@ -154,6 +155,15 @@ export function auditLyricContent (metadata, lyricsCsv) {
   })
 
   const songLyrics = lines.map(line => [line.start, line.end, line.lyric])
+  const timing = normalizeLyricTimingWindows(songLyrics)
+  if (timing.adjusted > 0) {
+    issues.push(issue(
+      'error',
+      'instrumental-gap-attached-to-lyric',
+      `${timing.adjusted} lyric window(s) include ${timing.removedGapMs} ms ` +
+      'of statistically implausible trailing time.',
+    ))
+  }
   let expectedCpm = 0
   let expectedPeakCpm = 0
   let paceCalculated = false
@@ -303,10 +313,16 @@ function auditMetadata (metadata, entries) {
   return issues
 }
 
-export async function auditSongLibrary ({ root }) {
+export async function auditSongLibrary ({
+  root,
+  includeSong = () => true,
+  includeInvalid = () => true,
+} = {}) {
   const library = await scanSongLibrary(root)
   const songs = []
-  for (const record of library.records) {
+  const records = library.records.filter(includeSong)
+  const invalidPackages = library.errors.filter(includeInvalid)
+  for (const record of records) {
     const manifest = await readPackedSongManifest(record._local_filename)
     const metadataIssues = auditMetadata(
       manifest.metadata,
@@ -341,7 +357,7 @@ export async function auditSongLibrary ({ root }) {
     })
   }
 
-  for (const invalid of library.errors) {
+  for (const invalid of invalidPackages) {
     songs.push({
       id: path.relative(root, invalid.filename),
       title: '',
@@ -371,7 +387,7 @@ export async function auditSongLibrary ({ root }) {
   return {
     ok: errors.length === 0,
     songs: songs.length,
-    packagesScanned: library.scannedFiles,
+    packagesScanned: records.length + invalidPackages.length,
     errors,
     warnings,
     languages,

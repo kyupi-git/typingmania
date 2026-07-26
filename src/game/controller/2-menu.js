@@ -17,6 +17,54 @@ import {
   LIBRARY_EDITOR_CONFIRM_CODE,
   LIBRARY_EDITOR_TOGGLE_CODE,
 } from '../../screen/library-editor-dialog.js'
+import { isStarterSong } from '../../song/starter-song.js'
+
+const IMPORT_PROVIDERS = Object.freeze([
+  {
+    id: 'qqmusic',
+    labelKey: 'import.qqMusic',
+    artwork: 'assets/provider-art/qqmusic.svg',
+  },
+  {
+    id: 'netease',
+    labelKey: 'import.netease',
+    artwork: 'assets/provider-art/netease.svg',
+  },
+  {
+    id: 'apple-music',
+    labelKey: 'import.appleMusic',
+    artwork: 'assets/provider-art/apple-music.svg',
+    asksForUrls: true,
+  },
+  {
+    id: 'local-files',
+    labelKey: 'import.localFolder',
+    artwork: 'assets/provider-art/local-files.svg',
+    selectsFolder: true,
+  },
+])
+
+const RESET_SCOPES = Object.freeze([
+  { id: 'all', labelKey: 'library.reset.scope.all' },
+  { id: 'qqmusic', labelKey: 'library.reset.scope.qqMusic' },
+  { id: 'netease', labelKey: 'library.reset.scope.netease' },
+  { id: 'apple-music', labelKey: 'library.reset.scope.appleMusic' },
+  { id: 'local-files', labelKey: 'library.reset.scope.localFolder' },
+])
+
+const LOCAL_IMPORT_EXTENSIONS = new Set([
+  '.aac', '.flac', '.jpeg', '.jpg', '.lrc', '.m4a', '.mp3', '.mp4',
+  '.ogg', '.png', '.txt', '.wav', '.webp',
+])
+
+const LOCAL_AUDIO_EXTENSIONS = new Set([
+  '.aac', '.flac', '.m4a', '.mp3', '.mp4', '.ogg', '.wav',
+])
+
+function fileExtension (value) {
+  const match = String(value || '').toLocaleLowerCase().match(/\.[^.\\/]+$/u)
+  return match?.[0] || ''
+}
 
 export default class MenuController {
   constructor (game) {
@@ -56,7 +104,7 @@ export default class MenuController {
   }
 
   updatePreviewArtwork (selection) {
-    if (!selection || selection instanceof SongCollection) {
+    if (!selection) {
       this.game.background_screen.hideSongBackground()
       return
     }
@@ -68,8 +116,8 @@ export default class MenuController {
       selection.poster_url ||
       selection.preview_image_is_poster,
     )
-    const albumUrl = usesPoster
-      ? (selection.image_url || selection.preview_album_url)
+    const albumUrl = usesPoster && !(selection instanceof SongCollection)
+      ? (selection.image_url || selection.preview_album_url || '')
       : ''
     if (!backgroundUrl) {
       this.game.background_screen.hideSongBackground()
@@ -79,6 +127,28 @@ export default class MenuController {
       backgroundUrl,
       albumUrl,
       { preferUpperPortrait: usesPoster },
+    )
+  }
+
+  updateImportProviderArtwork (index) {
+    const provider = IMPORT_PROVIDERS[Math.max(
+      0,
+      Math.min(IMPORT_PROVIDERS.length - 1, Number(index) || 0),
+    )]
+    this.game.background_screen.showSongBackground(
+      provider.artwork,
+      '',
+      { preferUpperPortrait: false },
+    )
+  }
+
+  restoreSelectedArtwork () {
+    if (!this.current_collection?.children?.length) {
+      this.game.background_screen.hideSongBackground()
+      return
+    }
+    this.updatePreviewArtwork(
+      this.current_collection.children[this.current_index],
     )
   }
 
@@ -275,25 +345,26 @@ export default class MenuController {
     return song
   }
 
-  localizedImportProgress (job) {
+  localizedImportProgress (job, providerLabel = '') {
     const values = {
       number: job.inspected || 1,
       title: job.songTitle || '',
     }
     const keys = {
-      session: 'qq.progress.session',
-      cache: 'qq.progress.cache',
-      metadata: 'qq.progress.metadata',
-      duplicate: 'qq.progress.existing',
-      origin: 'qq.progress.origin',
-      lyrics: 'qq.progress.lyrics',
-      cover: 'qq.progress.cover',
-      audio: 'qq.progress.audio',
-      pack: 'qq.progress.pack',
-      skipping: 'qq.progress.skipping',
-      index: 'qq.progress.index',
+      session: 'music.progress.session',
+      cache: 'music.progress.cache',
+      download: 'music.progress.download',
+      metadata: 'music.progress.metadata',
+      duplicate: 'music.progress.existing',
+      origin: 'music.progress.origin',
+      lyrics: 'music.progress.lyrics',
+      cover: 'music.progress.cover',
+      audio: 'music.progress.audio',
+      pack: 'music.progress.pack',
+      skipping: 'music.progress.skipping',
+      index: 'music.progress.index',
     }
-    const key = keys[job.phase] || 'qq.progress.default'
+    const key = keys[job.phase] || 'music.progress.default'
     const supportsSongTitle = new Set([
       'duplicate',
       'origin',
@@ -307,16 +378,19 @@ export default class MenuController {
       job.songTitle && supportsSongTitle.has(job.phase)
         ? `${key}.song`
         : key,
-      values,
+      { ...values, provider: providerLabel },
     )
   }
 
   localizedImportError (error) {
-    const key = error?.code ? `qq.error.${error.code}` : ''
-    const translated = key ? this.game.i18n.t(key) : ''
-    return translated && translated !== key
-      ? translated
-      : (error?.message || this.game.i18n.t('qq.importError'))
+    const keys = error?.code
+      ? [`music.error.${error.code}`, `qq.error.${error.code}`]
+      : []
+    for (const key of keys) {
+      const translated = this.game.i18n.t(key)
+      if (translated && translated !== key) return translated
+    }
+    return error?.message || this.game.i18n.t('music.importError')
   }
 
   async applyLanguage (locale) {
@@ -328,6 +402,13 @@ export default class MenuController {
     const enabled = this.game.preferences.toggleKeyEffects()
     this.game.menu_screen.setKeyEffectsEnabled(enabled)
     this.game.song_screen.setKeyEffectsEnabled(enabled)
+    this.game.sfx.play('select2')
+    return enabled
+  }
+
+  toggleMusicVideo () {
+    const enabled = this.game.preferences.toggleMusicVideo()
+    this.game.menu_screen.setMusicVideoEnabled(enabled)
     this.game.sfx.play('select2')
     return enabled
   }
@@ -422,30 +503,28 @@ export default class MenuController {
   async selectImportSource () {
     let selection = 0
     this.game.menu_screen.showImportSourceMenu(selection)
+    this.updateImportProviderArtwork(selection)
 
     while (true) {
       const action = await this.game.input.waitForAnyKey()
       const key = action.key
       if (key === 'ArrowUp') {
-        selection = 0
+        selection = (selection - 1 + IMPORT_PROVIDERS.length) %
+          IMPORT_PROVIDERS.length
         this.game.menu_screen.setImportSourceSelection(selection)
         this.game.menu_screen.setImportSourceNotice()
+        this.updateImportProviderArtwork(selection)
         this.game.sfx.play('select')
       } else if (key === 'ArrowDown') {
-        selection = 0
+        selection = (selection + 1) % IMPORT_PROVIDERS.length
         this.game.menu_screen.setImportSourceSelection(selection)
         this.game.menu_screen.setImportSourceNotice()
+        this.updateImportProviderArtwork(selection)
         this.game.sfx.play('select')
-      } else if (/^[1-2]$/.test(key)) {
-        if (key === '2') {
-          this.game.menu_screen.setImportSourceNotice(
-            'import.comingSoonDetail',
-          )
-          this.game.sfx.play('error')
-          continue
-        }
+      } else if (/^[1-4]$/.test(key)) {
         selection = Number(key) - 1
         this.game.menu_screen.setImportSourceSelection(selection)
+        this.updateImportProviderArtwork(selection)
         if (!isPointerApply(action)) continue
       } else if (
         key === 'Escape' ||
@@ -453,6 +532,7 @@ export default class MenuController {
         key.toLocaleLowerCase() === 'q'
       ) {
         this.game.menu_screen.hideImportSourceMenu()
+        this.restoreSelectedArtwork()
         this.game.sfx.play('exit')
         return
       } else if (
@@ -463,13 +543,11 @@ export default class MenuController {
         continue
       }
 
-      if (selection === 0) {
-        this.game.menu_screen.hideImportSourceMenu()
-        await this.importFromQQMusic()
-        return
-      }
-      this.game.menu_screen.setImportSourceNotice('import.comingSoonDetail')
-      this.game.sfx.play('error')
+      const provider = IMPORT_PROVIDERS[selection]
+      this.game.menu_screen.hideImportSourceMenu()
+      await this.importFromMusicProvider(provider)
+      this.restoreSelectedArtwork()
+      return
     }
   }
 
@@ -493,59 +571,192 @@ export default class MenuController {
     }
   }
 
-  async importFromQQMusic () {
+  async selectImportBatchSize (providerLabel) {
+    // Every import begins from the documented safe default. A player's
+    // one-off large batch must not silently become the next import's default.
+    let value = 10
+    this.game.menu_screen.showImportBatchMenu(value, providerLabel)
+    while (true) {
+      const action = await this.game.input.waitForAnyKey()
+      const key = action.key
+      if (key === 'ArrowUp' || key === 'ArrowRight') {
+        value = Math.min(500, value + 1)
+      } else if (key === 'ArrowDown' || key === 'ArrowLeft') {
+        value = Math.max(1, value - 1)
+      } else if (key === 'PageUp') {
+        value = Math.min(500, value + 10)
+      } else if (key === 'PageDown') {
+        value = Math.max(1, value - 10)
+      } else if (key === 'Home') {
+        value = 1
+      } else if (key === 'End') {
+        value = 500
+      } else if (key === 'Enter' || key === ' ' || key === 'Space') {
+        this.game.menu_screen.hideImportBatchMenu()
+        this.game.sfx.play('decide')
+        return value
+      } else if (key === 'Escape' || key === 'Backspace') {
+        this.game.menu_screen.hideImportBatchMenu()
+        this.game.sfx.play('exit')
+        return null
+      } else {
+        continue
+      }
+      this.game.menu_screen.setImportBatchValue(value)
+      this.game.sfx.play('select')
+    }
+  }
+
+  async importFromMusicProvider (provider) {
     const t = this.game.i18n.t.bind(this.game.i18n)
+    const providerLabel = t(provider.labelKey)
+    const batchSize = await this.selectImportBatchSize(providerLabel)
+    if (batchSize === null) return
+    let urls = []
+    let localFiles = []
+    if (provider.asksForUrls) {
+      const value = window.prompt(t('apple.urlPrompt'), '')
+      if (value === null) return
+      urls = value.split(/[\r\n\s]+/u).filter(Boolean)
+    }
+    if (provider.selectsFolder) {
+      localFiles = await this.selectLocalFolderFiles()
+      if (!localFiles.length) return
+    }
     this.game.sfx.play('decide')
     this.game.menu_screen.hide()
     this.game.songinfo_screen.hide()
     this.game.loading_screen.show()
-    this.game.loading_screen.setMainText(t('import.qqMusic'))
-    this.game.loading_screen.setSubText(t('qq.connecting'))
+    this.game.loading_screen.setMainText(providerLabel)
+    this.game.loading_screen.setSubText(t('music.connecting', {
+      provider: providerLabel,
+    }))
 
-    let finalMessage = t('qq.importFailed')
-    let finalDetail = t('qq.return')
+    let finalMessage = t('music.importFailed')
+    let finalDetail = t('music.return')
+    let uploadSessionId = ''
+    let uploadToken = ''
+    let importAccepted = false
+    let stopRequested = false
+    let stopRequestSent = false
+    const transferAbort = new AbortController()
+    const requestStop = event => {
+      if (!['Escape', 'Backspace'].includes(event.key)) return
+      stopRequested = true
+      transferAbort.abort()
+      this.game.loading_screen.setSubText(t('music.progress.stopping'))
+      if (!importAccepted || !uploadToken || stopRequestSent) return
+      stopRequestSent = true
+      fetch('/api/music-import/cancel', {
+        method: 'POST',
+        headers: { 'X-TMN-Token': uploadToken },
+      }).catch(() => {})
+    }
+    window.addEventListener('keydown', requestStop, true)
     try {
       const localResponse = await fetch('/api/local/status', { cache: 'no-store' })
       if (!localResponse.ok) {
-        throw new Error(t('qq.startLauncher'))
+        throw new Error(t('music.startLauncher'))
       }
       const local = await localResponse.json()
+      uploadToken = local.token
       const headers = {
         'Content-Type': 'application/json',
         'X-TMN-Token': local.token,
       }
-      const startResponse = await fetch('/api/qqmusic/import', {
+      if (provider.selectsFolder) {
+        const sessionResponse = await fetch('/api/local-folder/session', {
+          method: 'POST',
+          headers,
+          body: '{}',
+        })
+        const session = await sessionResponse.json().catch(() => ({}))
+        if (!sessionResponse.ok || !session.id) {
+          throw new Error(session.error || t('music.localFolderSessionError'))
+        }
+        uploadSessionId = session.id
+        for (let index = 0; index < localFiles.length; index++) {
+          const item = localFiles[index]
+          this.game.loading_screen.setSubText(t('music.progress.upload', {
+            current: index + 1,
+            total: localFiles.length,
+          }))
+          const uploadResponse = await fetch(
+            `/api/local-folder/file?session=${encodeURIComponent(uploadSessionId)}` +
+            `&path=${encodeURIComponent(item.relativePath)}`,
+            {
+              method: 'PUT',
+              headers: { 'X-TMN-Token': local.token },
+              body: item.file,
+              signal: transferAbort.signal,
+            },
+          )
+          if (!uploadResponse.ok) {
+            const uploadError = await uploadResponse.json().catch(() => ({}))
+            throw new Error(uploadError.error || t('music.localFolderUploadError'))
+          }
+        }
+      }
+      if (stopRequested) {
+        const cancelled = new Error('Import cancelled')
+        cancelled.name = 'AbortError'
+        throw cancelled
+      }
+      const audioCount = localFiles.filter(item => (
+        LOCAL_AUDIO_EXTENSIONS.has(fileExtension(item.relativePath))
+      )).length
+      const startResponse = await fetch(`/api/music-import/${provider.id}`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ limit: 20 }),
+        body: JSON.stringify({
+          limit: provider.selectsFolder
+            ? Math.max(1, Math.min(audioCount, batchSize))
+            : batchSize,
+          urls,
+          sessionId: uploadSessionId,
+        }),
       })
-      if (!startResponse.ok && startResponse.status !== 409) {
+      if (startResponse.status === 409) {
+        throw new Error(t('music.busy'))
+      }
+      if (!startResponse.ok) {
         const error = await startResponse.json().catch(() => ({}))
-        const failure = new Error(error.error || t('qq.startError'))
+        const failure = new Error(error.error || t('music.startError'))
         failure.code = error.code
         throw failure
+      }
+      importAccepted = true
+      if (stopRequested && !stopRequestSent) {
+        stopRequestSent = true
+        await fetch('/api/music-import/cancel', {
+          method: 'POST',
+          headers: { 'X-TMN-Token': local.token },
+        }).catch(() => {})
       }
 
       let job = await startResponse.json()
       while (job.state === 'running') {
-        this.game.loading_screen.setSubText(this.localizedImportProgress(job))
+        this.game.loading_screen.setSubText(
+          this.localizedImportProgress(job, providerLabel),
+        )
         await new Promise(resolve => setTimeout(resolve, 600))
-        const statusResponse = await fetch('/api/qqmusic/import/status', {
+        const statusResponse = await fetch('/api/music-import/status', {
           headers: { 'X-TMN-Token': local.token },
           cache: 'no-store',
         })
-        if (!statusResponse.ok) throw new Error(t('qq.connectionLost'))
+        if (!statusResponse.ok) throw new Error(t('music.connectionLost'))
         job = await statusResponse.json()
       }
 
       if (job.state === 'error') {
-        const failure = new Error(job.error?.message || job.message || t('qq.importError'))
+        const failure = new Error(job.error?.message || job.message || t('music.importError'))
         failure.code = job.error?.code
+        failure.result = job.result
         throw failure
       }
 
       const songResponse = await fetch(this.game.config.songs_url, { cache: 'no-store' })
-      if (!songResponse.ok) throw new Error(t('qq.libraryRefreshError'))
+      if (!songResponse.ok) throw new Error(t('music.libraryRefreshError'))
       this.game.songs.load(await songResponse.json())
       this.current_collection = this.game.songs.root
       this.current_index = 0
@@ -556,32 +767,48 @@ export default class MenuController {
       const imported = result.imported || 0
       const refreshed = result.refreshed || 0
       const requested = result.requested || 20
-      finalMessage = result.networkInterrupted
-        ? t('qq.result.interrupted', { count: imported })
+      finalMessage = result.cancelled
+        ? t('music.result.cancelled', { count: imported })
+        : result.networkInterrupted
+        ? t('music.result.interrupted', { count: imported, provider: providerLabel })
         : result.batchComplete
-          ? t('qq.result.complete', { count: imported })
+          ? t('music.result.complete', { count: imported, provider: providerLabel })
           : imported > 0
-            ? t('qq.result.exhausted', { count: imported, requested })
-            : t('qq.result.none')
-      finalDetail = t('qq.result.detail', {
+            ? t('music.result.exhausted', { count: imported, requested, provider: providerLabel })
+            : t('music.result.none', { provider: providerLabel })
+      finalDetail = t('music.result.detail', {
         imported,
         refreshed,
         existing: result.skipped || 0,
         duplicates: result.duplicates || 0,
         failed: result.failed || 0,
-      })
-      this.game.menu_screen.setImportHint(
-        result.batchComplete
-          ? 'qq.hint.next'
-          : 'qq.hint.moreCache',
-        { count: imported },
-      )
+      }) +
+        this.localizedFailureSummary(result) +
+        this.localizedRecentFailures(result)
     } catch (error) {
-      finalMessage = t('qq.unavailable')
-      finalDetail = t('qq.error.detail', {
-        error: this.localizedImportError(error),
-      })
-      this.game.sfx.play('error')
+      if (stopRequested || error?.name === 'AbortError') {
+        finalMessage = t('music.result.cancelled', { count: 0 })
+        finalDetail = t('music.result.cancelledDetail')
+      } else {
+        finalMessage = t('music.unavailable', { provider: providerLabel })
+        finalDetail = t('music.error.detail', {
+          error: this.localizedImportError(error),
+        }) +
+          this.localizedFailureSummary(error.result) +
+          this.localizedRecentFailures(error.result)
+        this.game.sfx.play('error')
+      }
+    } finally {
+      window.removeEventListener('keydown', requestStop, true)
+      if (uploadSessionId && !importAccepted && uploadToken) {
+        await fetch(
+          `/api/local-folder/session?session=${encodeURIComponent(uploadSessionId)}`,
+          {
+            method: 'DELETE',
+            headers: { 'X-TMN-Token': uploadToken },
+          },
+        ).catch(() => {})
+      }
     }
 
     this.game.loading_screen.setMainText(finalMessage)
@@ -593,6 +820,83 @@ export default class MenuController {
     this.updateSong(true)
   }
 
+  localizedFailureSummary (result) {
+    const entries = Object.entries(result?.failureReasons || {})
+      .filter(([, count]) => Number(count) > 0)
+    if (!entries.length) return ''
+    const reasons = entries
+      .map(([reason, count]) => this.game.i18n.t(
+        `music.failure.${reason}`,
+        { count },
+      ))
+      .join(' · ')
+    return `\n${this.game.i18n.t('music.result.failureReasons', { reasons })}`
+  }
+
+  localizedRecentFailures (result) {
+    const failures = Array.isArray(result?.failures)
+      ? result.failures.slice(-5)
+      : []
+    if (!failures.length) return ''
+    const lines = failures.map(failure => this.game.i18n.t(
+      'music.result.failureItem',
+      {
+        title: failure.title || this.game.i18n.t('common.unknown'),
+        reason: failure.reason || this.game.i18n.t('music.failure.other', {
+          count: 1,
+        }),
+      },
+    ))
+    return `\n${this.game.i18n.t('music.result.recentFailures')}\n${lines.join('\n')}`
+  }
+
+  async selectLocalFolderFiles () {
+    const collected = []
+    if (typeof window.showDirectoryPicker === 'function') {
+      try {
+        const root = await window.showDirectoryPicker({ mode: 'read' })
+        const visit = async (handle, prefix = '') => {
+          for await (const [name, child] of handle.entries()) {
+            const relativePath = prefix ? `${prefix}/${name}` : name
+            if (child.kind === 'directory') {
+              await visit(child, relativePath)
+            } else if (LOCAL_IMPORT_EXTENSIONS.has(fileExtension(name))) {
+              collected.push({ file: await child.getFile(), relativePath })
+            }
+          }
+        }
+        await visit(root)
+        return collected
+      } catch (error) {
+        if (error?.name === 'AbortError') return []
+      }
+    }
+
+    return new Promise(resolve => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.multiple = true
+      input.setAttribute('webkitdirectory', '')
+      input.style.display = 'none'
+      input.addEventListener('change', () => {
+        const files = [...(input.files || [])]
+          .filter(file => LOCAL_IMPORT_EXTENSIONS.has(fileExtension(file.name)))
+          .map(file => ({
+            file,
+            relativePath: file.webkitRelativePath || file.name,
+          }))
+        input.remove()
+        resolve(files)
+      }, { once: true })
+      input.addEventListener('cancel', () => {
+        input.remove()
+        resolve([])
+      }, { once: true })
+      document.body.appendChild(input)
+      input.click()
+    })
+  }
+
   playableSongs (collection, output = []) {
     for (const child of collection?.children || []) {
       if (Array.isArray(child.children)) {
@@ -602,11 +906,6 @@ export default class MenuController {
       }
     }
     return output
-  }
-
-  isStarterSong (song) {
-    return song?.source?.service === 'typingmania-demo' &&
-      song?.source?.baseline === true
   }
 
   clearSongClientState (songs, { clearAllScores = false } = {}) {
@@ -636,10 +935,31 @@ export default class MenuController {
     } catch {}
   }
 
-  async localLibrarySession () {
+  clearSongScoresByUrl (songUrls) {
+    try {
+      const wanted = new Set([...songUrls].map(String))
+      const storage = window.localStorage
+      const prefix = `typingmania:high_score:${window.location.href}:`
+      const keys = []
+      for (let index = 0; index < storage.length; index++) {
+        const key = storage.key(index)
+        if (key?.startsWith(prefix)) keys.push(key)
+      }
+      for (const key of keys) {
+        const value = key.endsWith(':class')
+          ? key.slice(prefix.length, -':class'.length)
+          : key.slice(prefix.length)
+        if (wanted.has(value)) storage.removeItem(key)
+      }
+    } catch {}
+  }
+
+  async localLibrarySession (
+    startMessageKey = 'library.editor.startLauncher',
+  ) {
     const response = await fetch('/api/local/status', { cache: 'no-store' })
     if (!response.ok) {
-      throw new Error(this.game.i18n.t('library.editor.startLauncher'))
+      throw new Error(this.game.i18n.t(startMessageKey))
     }
     const local = await response.json()
     return {
@@ -678,18 +998,24 @@ export default class MenuController {
     }
   }
 
-  async editLibrary () {
+  async editLibrary ({
+    providedSongs = null,
+    mode = 'editor',
+    providedSession = null,
+  } = {}) {
     const t = this.game.i18n.t.bind(this.game.i18n)
-    let session
-    let songs
+    let session = providedSession
+    let songs = providedSongs
     try {
-      session = await this.localLibrarySession()
-      const response = await fetch('/api/library/editable', {
-        headers: { 'X-TMN-Token': session.local.token },
-        cache: 'no-store',
-      })
-      if (!response.ok) throw new Error(t('library.editor.error'))
-      songs = (await response.json()).songs || []
+      if (!session) session = await this.localLibrarySession()
+      if (!songs) {
+        const response = await fetch('/api/library/editable', {
+          headers: { 'X-TMN-Token': session.local.token },
+          cache: 'no-store',
+        })
+        if (!response.ok) throw new Error(t('library.editor.error'))
+        songs = (await response.json()).songs || []
+      }
     } catch (error) {
       this.game.sfx.play('error')
       this.game.loading_screen.show()
@@ -702,7 +1028,7 @@ export default class MenuController {
 
     let cursor = 0
     const selectedIds = new Set()
-    this.game.menu_screen.showLibraryEditor(songs)
+    this.game.menu_screen.showLibraryEditor(songs, { mode })
     this.game.menu_screen.setLibraryEditorCursor(cursor)
     while (true) {
       const action = await this.game.input.waitForAnyKey()
@@ -740,7 +1066,7 @@ export default class MenuController {
       } else if (
         action.key === 'Escape' ||
         action.key === 'Backspace' ||
-        action.key.toLocaleLowerCase() === 'e'
+        action.key.toLocaleLowerCase() === (mode === 'duplicates' ? 'g' : 'e')
       ) {
         this.game.menu_screen.hideLibraryEditor()
         this.game.sfx.play('exit')
@@ -774,6 +1100,7 @@ export default class MenuController {
       }
 
       this.clearSongClientState(deletedSongs)
+      this.clearSongScoresByUrl(selectedIds)
       const songResponse = await fetch(this.game.config.songs_url, {
         cache: 'no-store',
       })
@@ -802,8 +1129,202 @@ export default class MenuController {
     this.updateSong(true)
   }
 
-  async confirmLibraryReset () {
-    this.game.menu_screen.showResetMenu()
+  async deduplicateLibrary () {
+    const t = this.game.i18n.t.bind(this.game.i18n)
+    try {
+      const session = await this.localLibrarySession()
+      const response = await fetch('/api/library/duplicates', {
+        headers: { 'X-TMN-Token': session.local.token },
+        cache: 'no-store',
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(result.error || t('library.dedupe.error'))
+      }
+      if (!result.songs?.length) {
+        this.game.loading_screen.show()
+        this.game.loading_screen.setMainText(t('library.dedupe.none'))
+        this.game.loading_screen.setSubText(t('library.dedupe.noneDetail'))
+        await this.game.input.waitForAnyKey()
+        this.game.loading_screen.hide()
+        return
+      }
+      await this.editLibrary({
+        providedSongs: result.songs,
+        mode: 'duplicates',
+        providedSession: session,
+      })
+    } catch (error) {
+      this.game.sfx.play('error')
+      this.game.loading_screen.show()
+      this.game.loading_screen.setMainText(t('library.dedupe.error'))
+      this.game.loading_screen.setSubText(error.message)
+      await this.game.input.waitForAnyKey()
+      this.game.loading_screen.hide()
+    }
+  }
+
+  async refreshLibraryMetadata () {
+    const t = this.game.i18n.t.bind(this.game.i18n)
+    this.game.sfx.play('decide')
+    this.game.menu_screen.hide()
+    this.game.songinfo_screen.hide()
+    this.game.loading_screen.show()
+    this.game.loading_screen.setMainText(t('metadata.refresh.starting'))
+    this.game.loading_screen.setSubText(t('loading.pleaseWait'))
+    let session = null
+    let stopRequested = false
+    let stopRequestSent = false
+    let jobStarted = false
+    let cancelled = false
+    const sendStopRequest = async () => {
+      if (!session || !jobStarted || stopRequestSent) return false
+      stopRequestSent = true
+      try {
+        await fetch('/api/library/metadata-refresh/cancel', {
+          method: 'POST',
+          headers: { 'X-TMN-Token': session.local.token },
+        })
+        return true
+      } catch {
+        stopRequestSent = false
+        return false
+      }
+    }
+    const requestStop = event => {
+      if (!['Escape', 'Backspace'].includes(event.key)) return
+      stopRequested = true
+      this.game.loading_screen.setSubText(t('metadata.refresh.stopping'))
+      void sendStopRequest()
+    }
+    window.addEventListener('keydown', requestStop, true)
+    try {
+      session = await this.localLibrarySession(
+        'metadata.refresh.startLauncher',
+      )
+      let job
+      if (stopRequested) {
+        job = {
+          state: 'complete',
+          result: { cancelled: true },
+        }
+      } else {
+        const response = await fetch('/api/library/metadata-refresh', {
+          method: 'POST',
+          headers: session.headers,
+          body: '{}',
+        })
+        job = await response.json().catch(() => ({}))
+        if (response.status === 409) {
+          throw new Error(t('metadata.refresh.busy'))
+        }
+        if (!response.ok) {
+          throw new Error(job.error?.message || t('metadata.refresh.error'))
+        }
+        jobStarted = true
+        if (stopRequested) await sendStopRequest()
+      }
+      while (job.state === 'running') {
+        if (stopRequested) await sendStopRequest()
+        this.game.loading_screen.setSubText(t('metadata.refresh.progress', {
+          current: job.inspected || 0,
+          total: job.total || '…',
+          title: job.songTitle || '',
+        }))
+        await new Promise(resolve => setTimeout(resolve, 120))
+        const status = await fetch('/api/library/metadata-refresh/status', {
+          headers: { 'X-TMN-Token': session.local.token },
+          cache: 'no-store',
+        })
+        if (!status.ok) throw new Error(t('metadata.refresh.error'))
+        job = await status.json()
+      }
+      if (job.state === 'error') {
+        throw new Error(job.error?.message || t('metadata.refresh.error'))
+      }
+      const result = job.result || {}
+      cancelled = Boolean(result.cancelled || stopRequested)
+      const songResponse = await fetch(this.game.config.songs_url, {
+        cache: 'no-store',
+      })
+      if (!songResponse.ok) throw new Error(t('qq.libraryRefreshError'))
+      this.game.songs.load(await songResponse.json())
+      this.game.songs.current_song = null
+      this.local_collection = null
+      this.current_collection = this.game.songs.root
+      this.current_index = 0
+      this.captureLibraryOrder()
+      this.sortCollection(this.current_collection)
+      this.game.loading_screen.setMainText(t(
+        cancelled
+          ? 'metadata.refresh.cancelled'
+          : result.networkInterrupted
+          ? 'metadata.refresh.interrupted'
+          : 'metadata.refresh.complete',
+      ))
+      this.game.loading_screen.setSubText(t(
+        cancelled
+          ? 'metadata.refresh.cancelledDetail'
+          : result.networkInterrupted
+          ? 'metadata.refresh.interruptedDetail'
+          : 'metadata.refresh.completeDetail',
+        {
+          updated: result.updated || 0,
+          metadata: result.metadata || 0,
+          origins: result.origins || 0,
+          posters: result.posters || 0,
+          covers: result.covers || 0,
+        },
+      ) + this.localizedRecentFailures(result))
+    } catch (error) {
+      this.game.sfx.play('error')
+      this.game.loading_screen.setMainText(t('metadata.refresh.error'))
+      this.game.loading_screen.setSubText(
+        error.message || t('metadata.refresh.startLauncher'),
+      )
+    } finally {
+      cancelled = cancelled || stopRequested
+      window.removeEventListener('keydown', requestStop, true)
+    }
+    if (!cancelled) await this.game.input.waitForAnyKey()
+    this.game.loading_screen.hide()
+    this.game.menu_screen.show()
+    this.game.songinfo_screen.show()
+    this.updateSong(true)
+  }
+
+  async selectLibraryResetScope () {
+    let selection = 0
+    this.game.menu_screen.showResetScopeMenu(selection)
+    while (true) {
+      const action = await this.game.input.waitForAnyKey()
+      const key = action.key
+      if (key === 'ArrowUp') {
+        selection = (selection - 1 + RESET_SCOPES.length) % RESET_SCOPES.length
+      } else if (key === 'ArrowDown') {
+        selection = (selection + 1) % RESET_SCOPES.length
+      } else if (/^[1-5]$/.test(key)) {
+        selection = Number(key) - 1
+        this.game.menu_screen.setResetScopeSelection(selection)
+        if (!isPointerApply(action)) continue
+      } else if (key === 'Escape' || key === 'Backspace') {
+        this.game.menu_screen.hideResetScopeMenu()
+        return null
+      } else if (!['Enter', ' ', 'Space'].includes(key)) {
+        continue
+      }
+      this.game.menu_screen.setResetScopeSelection(selection)
+      if (['ArrowUp', 'ArrowDown'].includes(key)) {
+        this.game.sfx.play('select')
+        continue
+      }
+      this.game.menu_screen.hideResetScopeMenu()
+      return RESET_SCOPES[selection]
+    }
+  }
+
+  async confirmLibraryReset (scope) {
+    this.game.menu_screen.showResetMenu(scope)
     while (true) {
       const confirmation = await this.game.input.waitForAnyKey()
       if (confirmation.key.toLocaleLowerCase() === 'd') {
@@ -823,7 +1344,8 @@ export default class MenuController {
   async resetLibrary () {
     const t = this.game.i18n.t.bind(this.game.i18n)
     this.game.sfx.play('decide')
-    if (!await this.confirmLibraryReset()) {
+    const scope = await this.selectLibraryResetScope()
+    if (!scope || !await this.confirmLibraryReset(scope)) {
       this.game.sfx.play('exit')
       return
     }
@@ -843,11 +1365,17 @@ export default class MenuController {
         'X-TMN-Token': local.token,
       }
       const addedSongs = this.playableSongs(this.game.songs.root)
-        .filter(song => !this.isStarterSong(song))
+        .filter(song => (
+          !isStarterSong(song) &&
+          (scope.id === 'all' || song.source?.service === scope.id)
+        ))
       const resetResponse = await fetch('/api/library/reset', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ confirm: 'RESTORE_STARTER_LIBRARY' }),
+        body: JSON.stringify({
+          confirm: 'RESET_LIBRARY_SCOPE',
+          scope: scope.id,
+        }),
       })
       const result = await resetResponse.json().catch(() => ({}))
       if (resetResponse.status === 409) {
@@ -857,7 +1385,9 @@ export default class MenuController {
         throw new Error(result.error || t('library.reset.error'))
       }
 
-      this.clearSongClientState(addedSongs, { clearAllScores: true })
+      this.clearSongClientState(addedSongs, {
+        clearAllScores: scope.id === 'all',
+      })
       const songResponse = await fetch(this.game.config.songs_url, {
         cache: 'no-store',
       })
@@ -869,7 +1399,6 @@ export default class MenuController {
       this.current_index = 0
       this.captureLibraryOrder()
       this.sortCollection(this.current_collection)
-      this.game.menu_screen.setImportHint('menu.importHint')
       const removedCount = Math.max(
         Number(result.deleted || 0),
         addedSongs.length,
@@ -1017,6 +1546,11 @@ export default class MenuController {
             this.toggleDemoMode()
             break
 
+          case 'v':
+          case 'V':
+            this.toggleMusicVideo()
+            break
+
           case 'd':
           case 'D':
             await this.resetLibrary()
@@ -1025,6 +1559,16 @@ export default class MenuController {
           case 'e':
           case 'E':
             await this.editLibrary()
+            break
+
+          case 'u':
+          case 'U':
+            await this.refreshLibraryMetadata()
+            break
+
+          case 'g':
+          case 'G':
+            await this.deduplicateLibrary()
             break
 
           case 'a':

@@ -1,6 +1,7 @@
 import { describe, expect, test } from '@jest/globals'
 
 import {
+  fetchTrackMetadataWithFallback,
   interpretQQMusicSessionResult,
   parseOfficialLyricsPayload,
   QQMusicImportError,
@@ -38,6 +39,35 @@ describe('QQ Music session result handling', () => {
     expect(() => interpretQQMusicSessionResult(null))
       .toThrow(new QQMusicImportError('QQMUSIC_SESSION_READ_FAILED'))
   })
+})
+
+test('cached media metadata falls back through lyric search hints', async () => {
+  const metadataCalls = []
+  const fetchMetadata = async value => {
+    metadataCalls.push(value)
+    if (value === 'song-mid') return { songMid: value, title: 'Found' }
+    throw new Error('metadata is unavailable')
+  }
+  const result = await fetchTrackMetadataWithFallback(
+    'media-mid',
+    'cookie',
+    {
+      hints: [
+        { title: 'Wrong', artist: 'Artist' },
+        { title: 'Right', artist: 'Artist' },
+      ],
+      fetchMetadata,
+      searchTracks: async query => (
+        query.startsWith('Right')
+          ? [{ mediaMid: 'media-mid', songMid: 'song-mid' }]
+          : [{ mediaMid: 'other-media', songMid: 'other-song' }]
+      ),
+      batchSize: 2,
+    },
+  )
+
+  expect(result).toEqual({ songMid: 'song-mid', title: 'Found' })
+  expect(metadataCalls).toEqual(['media-mid', 'song-mid'])
 })
 
 test('official lyric payload keeps the service-provided Roma track', () => {

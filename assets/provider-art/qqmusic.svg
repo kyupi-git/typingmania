@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" role="img" aria-label="QQ Music imported songs">
+  <defs><linearGradient id="bg" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#0b775d"/><stop offset="1" stop-color="#31d47d"/></linearGradient><filter id="shadow"><feDropShadow dx="0" dy="24" stdDeviation="28" flood-opacity=".32"/></filter></defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <circle cx="960" cy="460" r="330" fill="#fff" opacity=".12"/>
+  <g fill="none" stroke="#fff" stroke-width="42" stroke-linecap="round" stroke-linejoin="round" filter="url(#shadow)">
+    <path d="M1030 230v390c0 105-85 190-190 190s-190-85-190-190 85-190 190-190c45 0 86 15 119 41"/>
+    <path d="M1030 230c60 160 165 238 300 260"/>
+    <path d="M1045 390c115 15 203 67 265 160"/>
+  </g>
+  <text x="960" y="930" text-anchor="middle" fill="#fff" font-family="Open Sans, sans-serif" font-size="92" font-weight="700">QQ Music</text>
+</svg>

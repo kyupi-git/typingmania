@@ -1,0 +1,134 @@
+Metadata-Version: 2.4
+Name: httpx-retries
+Version: 0.6.0
+Dynamic: License
+Dynamic: License-Expression
+Summary: A retry layer for HTTPX.
+Project-URL: Changelog, https://github.com/will-ockmore/httpx-retries/blob/master/CHANGELOG.md
+Project-URL: Documentation, https://will-ockmore.github.io/httpx-retries
+Project-URL: Homepage, https://github.com/will-ockmore/httpx-retries
+Project-URL: Source, https://github.com/will-ockmore/httpx-retries
+Author-email: Will Ockmore <will.ockmore@gmail.com>
+License-File: LICENSE
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Web Environment
+Classifier: Framework :: AsyncIO
+Classifier: Framework :: Trio
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3.14
+Classifier: Topic :: Internet :: WWW/HTTP
+Requires-Python: >=3.10
+Requires-Dist: httpx>=0.20.0
+Description-Content-Type: text/markdown
+
+
+
+<em>A retry layer for HTTPX.</em>
+
+
+---
+
+HTTPX Retries implements request retry for [HTTPX](https://www.python-httpx.org/).
+
+It's very common to deal with **flaky** and **unreliable** APIs. When requests fail, your program needs to be able
+to retry them.
+
+---
+
+Install HTTPX Retries using pip:
+
+``` bash
+pip install httpx-retries
+```
+
+---
+
+To get started, add the transport to your client:
+
+``` python
+import httpx
+from httpx_retries import RetryTransport
+
+with httpx.Client(transport=RetryTransport()) as client:
+    response = client.get("https://example.com")
+```
+
+Async usage is just as straightforward.
+
+``` python
+async with httpx.AsyncClient(transport=RetryTransport()) as client:
+    response = await client.get("https://example.com")
+```
+
+If you want to use a specific retry strategy, provide a `Retry` configuration:
+
+``` python
+from httpx_retries import Retry
+
+retry = Retry(total=5, backoff_factor=0.5)
+transport = RetryTransport(retry=retry)
+
+with httpx.Client(transport=transport) as client:
+    response = client.get("https://example.com")
+```
+
+> **Errors while reading the response body** (such as `ReadTimeout` part-way through a download) happen
+> after the transport has returned, so `RetryTransport` can't retry them. This is a niche case,
+> but if you read very large or slow bodies and need those retried, see the `retry_request` / `aretry_request` helpers in
+> [Why wasn't my `ReadTimeout` retried?](https://will-ockmore.github.io/httpx-retries/faq/#why-wasnt-my-readtimeout-retried).
+
+## Features
+
+HTTPX Retries builds on the patterns users will expect from `urllib` and `requests`. The typical approach has been
+to use [urllib3's Retry](https://urllib3.readthedocs.io/en/latest/reference/urllib3.util.html#urllib3.util.Retry)
+utility to configure a retry policy. The equivalent code to match the above example using
+[requests](https://requests.readthedocs.io/en/latest/) is:
+
+``` python
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+retry = Retry(total=5, backoff_factor=0.5)
+adapter = HTTPAdapter(max_retries=retry)
+
+with requests.Session() as session:
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    response = session.get("https://example.com")
+```
+
+To reduce boilerplate, this package includes a transport that works with both sync and async HTTPX Clients, with
+sensible defaults for simple use cases.
+
+HTTPX adds support for asynchronous requests, and this package includes a new retry utility that can handle this
+behaviour.
+To make it easy to migrate, the API surface is almost identical to `Retry` from urllib3, with a few main differences:
+
+- `total` is the only parameter used to configure the number of retries.
+- `asleep` is an async implementation of `sleep`.
+- `backoff_strategy` can be overridden to customize backoff behavior.
+- Some options that are not strictly retry-related are not included (`raise_on_status`, `raise_on_redirect`)
+
+## Differences with other retry libraries
+
+HTTPX Retries tries to make configuring retries simple and centralised, for the case of request / response.
+Other libraries are general purpose, which is good if you need to have a fully custom retry strategy.
+Usually though, most programs need a set of sensible defaults, configured once.
+
+Take a look at the [comparison with other libraries](https://will-ockmore.github.io/httpx-retries/differences_with_other_retry_libraries/)
+in the documentation.
+
+## Contributing
+
+If you want to contribute to the project, check out the [Contributing Guide](https://will-ockmore.github.io/httpx-retries/contributing/).
+
+## Acknowledgements
+
+This package builds on the great work done on [HTTPX](https://www.python-httpx.org/), [urllib3](https://urllib3.readthedocs.io/en/stable/) and [requests](https://requests.readthedocs.io/en/latest/).

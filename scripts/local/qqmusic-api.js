@@ -6,21 +6,23 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
 import { analyzeSongTitle } from '../../src/song/song-title.js'
+import * as qmcCrypto from '../../vendor/runtime/node_modules/@clamber_l/crypto/dist/loader.mjs'
 import {
   filterLyricLines,
   longestCommonSubsequenceLength,
   normalizeLyricComparable,
 } from './lyrics-quality.js'
 import { fetchWithRetry } from './network.js'
+import { extractLyricContent, parseTimedQrcLines } from './qqmusic-qrc.js'
 
 const execFile = promisify(childProcess.execFile)
 const SESSION_SCRIPT = fileURLToPath(new URL('./read-qqmusic-session.ps1', import.meta.url))
 const POWERSHELL = process.env.TMN_POWERSHELL || 'powershell.exe'
 
 const ERROR_MESSAGES = {
-  QQMUSIC_NOT_RUNNING: 'Please start QQ Music and sign in with a Green Diamond account, then try again.',
+  QQMUSIC_NOT_RUNNING: 'Please start QQ Music and sign in, then try again.',
   QQMUSIC_ACCESS_DENIED: 'TypingManiaNovel cannot read QQ Music. Start both applications with the same Windows account.',
-  QQMUSIC_NOT_LOGGED_IN: 'Please sign in to QQ Music with a Green Diamond account, then try again.',
+  QQMUSIC_NOT_LOGGED_IN: 'Please sign in to QQ Music, then try again.',
   QQMUSIC_SESSION_INVALID: 'The QQ Music session is not usable. Sign out and sign in again, then retry.',
   QQMUSIC_CACHE_NOT_FOUND: 'QQMusicCache was not found. Set QQMUSIC_CACHE_DIR or move the cache into the game folder.',
 }
@@ -196,6 +198,52 @@ export async function discoverQQMusicCache (projectRoot, memoryPaths = []) {
   throw new QQMusicImportError('QQMUSIC_CACHE_NOT_FOUND')
 }
 
+export async function discoverQQMusicDownloadDirectories (
+  projectRoot,
+  { cachePath = '', memoryPaths = [] } = {},
+) {
+  const candidates = []
+  const seen = new Set()
+  const add = value => {
+    if (!value) return
+    const resolved = path.resolve(value)
+    const key = resolved.toLocaleLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    candidates.push(resolved)
+  }
+  add(process.env.QQMUSIC_DOWNLOAD_DIR)
+  add(path.join(projectRoot, 'QQMusicDownloads'))
+  add(path.join(projectRoot, 'QQMusic'))
+  const home = os.homedir()
+  add(path.join(home, 'Music', 'QQMusic'))
+  add(path.join(home, 'Music', 'QQ音乐'))
+  add(path.join(home, 'Downloads', 'QQMusic'))
+  if (cachePath) {
+    const parent = path.dirname(cachePath)
+    add(path.join(parent, 'QQMusic'))
+    add(path.join(parent, 'QQMusicDownload'))
+    add(path.join(parent, 'QQMusicDownloads'))
+  }
+  for (const memoryPath of memoryPaths) {
+    const parent = path.dirname(memoryPath)
+    add(path.join(parent, 'QQMusic'))
+    add(path.join(parent, 'QQMusicDownload'))
+  }
+  for (const drive of await listDriveRoots()) {
+    add(path.join(drive, 'QQMusic'))
+    add(path.join(drive, 'QQMusicDownload'))
+    add(path.join(drive, 'QQ音乐'))
+  }
+  const existing = []
+  for (const candidate of candidates) {
+    try {
+      if ((await fs.stat(candidate)).isDirectory()) existing.push(candidate)
+    } catch {}
+  }
+  return existing
+}
+
 function qqHeaders (cookie) {
   return {
     'User-Agent': 'QQMusic/21',
@@ -243,6 +291,7 @@ export async function fetchTrackMetadata (mediaMid, cookie) {
     .filter(artist => artist.name)
   const artistNames = artists.map(artist => artist.name)
   return {
+    songId: String(raw.id || ''),
     songMid: raw.mid,
     mediaMid: raw.file.media_mid || mediaMid,
     title: titleCleanup.title,
@@ -255,10 +304,84 @@ export async function fetchTrackMetadata (mediaMid, cookie) {
     artists,
     album: raw.album?.title || '',
     albumMid: raw.album?.mid || '',
+    mvId: String(raw.mv?.vid || raw.mv?.id || ''),
     duration: Number(raw.interval) || 0,
     expectedFlacBytes: Number(raw.file.size_flac) || 0,
     language,
   }
+}
+
+export async function fetchTrackMetadataWithFallback (
+  mediaMid,
+  cookie,
+  {
+    hints = [],
+    searchCache = new Map(),
+    candidateCache = new Map(),
+    batchSize = 4,
+    fetchMetadata = fetchTrackMetadata,
+    searchTracks = searchQQMusicTracks,
+  } = {},
+) {
+  let directError = null
+  try {
+    return await fetchMetadata(mediaMid, cookie)
+  } catch (error) {
+    directError = error
+  }
+
+  const resolveCandidate = async candidate => {
+    if (!candidate?.songMid) return null
+    return fetchMetadata(candidate.songMid, cookie)
+  }
+  if (candidateCache.has(mediaMid)) {
+    try {
+      return await resolveCandidate(candidateCache.get(mediaMid))
+    } catch {}
+  }
+
+  const uniqueHints = []
+  const seenQueries = new Set()
+  for (const hint of hints) {
+    const query = `${hint?.title || ''} ${hint?.artist || ''}`.trim()
+    const normalized = query.normalize('NFKC').toLocaleLowerCase()
+    if (!normalized || seenQueries.has(normalized)) continue
+    seenQueries.add(normalized)
+    uniqueHints.push(query)
+  }
+  const width = Math.max(1, Math.min(6, Number(batchSize) || 4))
+  for (let offset = 0; offset < uniqueHints.length; offset += width) {
+    const batch = uniqueHints.slice(offset, offset + width)
+    const outcomes = await Promise.allSettled(batch.map(async query => {
+      if (!searchCache.has(query)) {
+        searchCache.set(query, Promise.resolve(
+          searchTracks(query, cookie, { limit: 30 }),
+        ))
+      }
+      try {
+        const candidates = await searchCache.get(query)
+        searchCache.set(query, candidates)
+        return candidates
+      } catch (error) {
+        searchCache.delete(query)
+        throw error
+      }
+    }))
+    for (const outcome of outcomes) {
+      if (outcome.status !== 'fulfilled') continue
+      for (const candidate of outcome.value) {
+        if (candidate.mediaMid && !candidateCache.has(candidate.mediaMid)) {
+          candidateCache.set(candidate.mediaMid, candidate)
+        }
+      }
+    }
+    if (candidateCache.has(mediaMid)) {
+      try {
+        return await resolveCandidate(candidateCache.get(mediaMid))
+      } catch {}
+    }
+  }
+  throw directError || new Error('metadata is unavailable')
 }
 
 export async function fetchTrackEkey ({ metadata, localFilename, cookie, uin }) {
@@ -300,7 +423,11 @@ export async function fetchTrackEkey ({ metadata, localFilename, cookie, uin }) 
   if (!response.ok) throw new Error(`ekey HTTP ${response.status}`)
   const payload = await response.json()
   const ekey = payload.req_1?.data?.midurlinfo?.[0]?.ekey || ''
-  if (!ekey) throw new Error('QQ Music returned an empty ekey; Green Diamond access may be required')
+  if (!ekey) {
+    throw new Error(
+      'QQ Music did not grant access to this track for the signed-in account',
+    )
+  }
   return ekey
 }
 
@@ -361,6 +488,7 @@ export async function searchQQMusicTracks (
       .filter(Boolean)
     return {
       songMid: raw.songmid || '',
+      mediaMid: raw.strMediaMid || raw.media_mid || raw.file?.media_mid || '',
       title: stripSearchMarkup(raw.songname),
       artist: artistNames.join(' / '),
       artistNames,
@@ -499,6 +627,88 @@ export async function fetchOfficialLyrics (songMid, cookie, metadata = {}) {
       readingReason: error.message,
       networkFailed: isQQMusicNetworkError(error),
     }
+  }
+}
+
+function decodedPcQrc (xml, fieldName) {
+  const match = String(xml || '').match(
+    new RegExp(`<${fieldName}>([\\s\\S]*?)<\\/${fieldName}>`, 'iu'),
+  )
+  const hex = String(match?.[1] || '')
+    .replace(/^\s*<!\[CDATA\[/u, '')
+    .replace(/\]\]>\s*$/u, '')
+    .trim()
+  if (!hex || hex.length % 2 || !/^[a-f0-9]+$/iu.test(hex)) return ''
+  const decrypted = qmcCrypto.decryptQRCFile(Buffer.from(hex, 'hex'))
+  return new TextDecoder().decode(decrypted)
+}
+
+export async function fetchQQMusicPcLyrics (
+  songId,
+  cookie,
+  metadata = {},
+) {
+  if (!/^\d+$/u.test(String(songId || ''))) {
+    throw new Error('QQ Music numeric song ID is unavailable')
+  }
+  const url = new URL('https://c.y.qq.com/qqmusic/fcgi-bin/lyric_download.fcg')
+  url.searchParams.set('version', '15')
+  url.searchParams.set('miniversion', '82')
+  url.searchParams.set('lrctype', '4')
+  url.searchParams.set('musicid', String(songId))
+  const response = await fetchWithRetry(globalThis.fetch, url, {
+    headers: { ...qqHeaders(cookie), Referer: 'https://y.qq.com/' },
+  }, {
+    timeoutMs: 5000,
+    perAttemptMs: 2700,
+  })
+  if (!response.ok) throw new Error(`PC lyric HTTP ${response.status}`)
+  const xml = await response.text()
+  const parse = fieldName => {
+    const qrc = decodedPcQrc(xml, fieldName)
+    return qrc ? parseTimedQrcLines(extractLyricContent(qrc)) : []
+  }
+  const lines = filterLyricLines(parse('content'), metadata).kept
+  const readingLines = filterLyricLines(
+    parse('contentroma'),
+    metadata,
+    { romanized: true },
+  ).kept
+  return {
+    checked: lines.length > 0,
+    lines,
+    reason: lines.length ? null : 'QQ Music PC lyrics unavailable',
+    readingChecked: readingLines.length > 0,
+    readingLines,
+    readingReason: readingLines.length
+      ? null
+      : 'QQ Music PC pronunciation unavailable',
+    networkFailed: false,
+  }
+}
+
+export async function fetchBestQQMusicLyrics ({
+  songMid,
+  songId = '',
+  cookie = '',
+  metadata = {},
+}) {
+  const web = await fetchOfficialLyrics(songMid, cookie, metadata)
+  if (web.readingLines.length || !songId) return web
+  try {
+    const pc = await fetchQQMusicPcLyrics(songId, cookie, metadata)
+    return {
+      ...web,
+      checked: pc.checked || web.checked,
+      lines: pc.lines.length ? pc.lines : web.lines,
+      reason: pc.lines.length ? null : web.reason,
+      readingChecked: pc.readingChecked,
+      readingLines: pc.readingLines,
+      readingReason: pc.readingReason,
+      networkFailed: false,
+    }
+  } catch {
+    return web
   }
 }
 

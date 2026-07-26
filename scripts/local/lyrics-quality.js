@@ -1,20 +1,54 @@
-const CJK_CREDIT_PREFIX = /^(?:(?:作詞・作曲|作詞作曲|作词作曲|詞曲|词曲|作詞|作词|作曲|作編曲|作编曲|編曲|编曲|詞|词|曲|填詞|填词|譜曲|谱曲|監修|监制|監製|制作人|製作人|プロデュース|歌手|原唱|演唱|歌唱|歌|唄|和聲|和声|録音|录音|錄音|混音|母帶|母带|吉他|ギター|貝斯|贝斯|ベース|鼓|ドラム|鍵盤|键盘|キーボード|弦樂|弦乐|翻譯|翻译|譯|译|發行|发行|出品|版權|版权)(?:\s*(?:[・/&、,+]|and)\s*(?:作詞|作词|作曲|作編曲|作编曲|編曲|编曲|詞|词|曲|填詞|填词|譜曲|谱曲|監修|监制|監製|制作人|製作人|歌|唄))*)(?:\s*[:：]|\s+)/iu
+const CJK_CREDIT_PREFIX = /^(?:(?:作詞・作曲|作詞作曲|作词作曲|詞曲|词曲|作詞|作词|作曲|作編曲|作编曲|編曲|编曲|詞|词|曲|填詞|填词|譜曲|谱曲|監修|监制|監製|制作人|製作人|プロデュース|歌手|原唱|演唱|歌唱|歌|唄|和聲|和声|録音|录音|錄音|混音|母帶|母带|吉他|ギター|貝斯|贝斯|ベース|鼓|ドラム|鍵盤|键盘|キーボード|弦樂|弦乐|翻譯|翻译|譯|译|發行|发行|出品|版權|版权)(?:\s*(?:[・/&、,+]|and)\s*(?:作詞|作词|作曲|作編曲|作编曲|編曲|编曲|詞|词|曲|填詞|填词|譜曲|谱曲|監修|监制|監製|制作人|製作人|歌|唄))*)(?:\s*[:：∶]|\s+)/iu
 const ENGLISH_CREDIT_PREFIX = /^(?:(?:lyrics?|words|music|compos(?:ed|er|ition)|written|songwrit(?:er|ing)|arrang(?:ed|er|ement)|produc(?:ed|er|tion)|perform(?:ed|er)|vocals?|mix(?:ed|er|ing)|master(?:ed|ing)|record(?:ed|ing)|publish(?:ed|er)|translation|translated)(?:\s*(?:&|and|\/|\+)\s*(?:lyrics?|words|music|compos(?:ed|er|ition)|written|songwrit(?:er|ing)|arrang(?:ed|er|ement)|produc(?:ed|er|tion)))?\s*(?:(?:by|from)\s*[:：]?|[:：]))/iu
 const COPYRIGHT_PREFIX = /^(?:©|℗|copyright\b|all rights reserved\b|未經許可|未经许可|本歌曲来自|本歌曲來自|qq音乐|qq音樂)/iu
 const ROMANIZED_CREDIT_PREFIX = /^(?:shi|xi|sakushi|kyoku|kiyoku|sakkyoku|henkyoku|henkiyoku|seisakujin)\s*[:：]/iu
 const LRC_METADATA = /^\[(?:ar|al|ti|by|offset|kana|language|re|ve):/iu
 const SECTION_HEADER = /^(?:[\[【(（]\s*)?(?:verse|chorus|pre[\s-]?chorus|bridge|intro|outro|hook|refrain|interlude|instrumental|rap|spoken|主歌|副歌|前奏|间奏|間奏|尾奏|サビ|[ABC]メロ)(?:\s*\d+)?\s*(?:[\]】)）]|[:：])?$/iu
-export const LYRIC_QUALITY_VERSION = 5
+const NON_VOCAL_PLACEHOLDER =
+  /^(?:纯音乐(?:[，,]?请欣赏)?|純音樂(?:[，,]?請欣賞)?|纯音乐无歌词|純音楽|暂无歌词|暫無歌詞|该歌曲暂无歌词|該歌曲暫無歌詞|此歌曲为没有填词的纯音乐|此歌曲為沒有填詞的純音樂|无歌词|無歌詞|歌詞なし|インスト(?:ゥ?ルメンタル)?|inst(?:rumental)?\.?|instrumental music|no lyrics|music only|background music|bgm)$/iu
+const NON_VOCAL_TITLE =
+  /(?:^|[\s([（【._-])(?:inst(?:rumental)?\.?|karaoke|off(?:[\s-]+main)?[\s-]?vocal|backing track|伴奏|纯音乐|純音樂|純音楽|カラオケ|インスト(?:ゥ?ルメンタル)?|bgm)(?:$|[\s)\]）】._-])/iu
+export const LYRIC_QUALITY_VERSION = 10
 
-function stripInlineRuby (text) {
-  return text.replace(
-    /([\p{Script=Han}々〆ヵヶ])[\(（]([\p{Script=Hiragana}\p{Script=Katakana}ー・\s]+)[\)）]/gu,
+export function isNonVocalTrackMetadata (metadata = {}) {
+  return NON_VOCAL_TITLE.test(
+    `${metadata.rawTitle || ''} ${metadata.title || ''} ${metadata.subtitle || ''}`,
+  )
+}
+
+export function stripInlineLyricRuby (text) {
+  return String(text || '').replace(
+    /([\p{Script=Han}々〆ヵヶ]+)[\(（]([\p{Script=Hiragana}\p{Script=Katakana}ー・\s]+)[\)）]/gu,
+    '$1',
+  ).replace(
+    /([\p{Script=Han}々〆ヵヶ]+)[\(（]([\p{Script=Hiragana}\p{Script=Katakana}ー・\s]+)$/gu,
     '$1',
   )
 }
 
+export function inlineLyricRubyReading (text) {
+  const source = String(text || '')
+  let replacements = 0
+  const reading = source.replace(
+    /([\p{Script=Han}々〆ヵヶ]+)[\(（]([\p{Script=Hiragana}\p{Script=Katakana}ー・\s]+)[\)）]/gu,
+    (_, _written, value) => {
+      replacements++
+      return value
+    },
+  ).replace(
+    /([\p{Script=Han}々〆ヵヶ]+)[\(（]([\p{Script=Hiragana}\p{Script=Katakana}ー・\s]+)$/gu,
+    (_, _written, value) => {
+      replacements++
+      return value
+    },
+  )
+  return replacements > 0 && !/[\p{Script=Han}々〆ヵヶ]/u.test(reading)
+    ? reading
+    : ''
+}
+
 export function normalizeLyricComparable (value) {
-  return stripInlineRuby(String(value || ''))
+  return stripInlineLyricRuby(value)
     .replace(/^(?:\[[^\]]+\])+/, '')
     .replace(/\(\d+,\d+\)/g, '')
     .normalize('NFKC')
@@ -52,6 +86,9 @@ export function lyricLineKind (line, {
   if (SECTION_HEADER.test(text)) {
     return 'header'
   }
+  if (NON_VOCAL_PLACEHOLDER.test(text)) {
+    return 'non-vocal'
+  }
   const compactLabel = text.replace(/\s+/g, '')
   if (
     CJK_CREDIT_PREFIX.test(text) ||
@@ -64,6 +101,22 @@ export function lyricLineKind (line, {
   }
 
   const start = Number(line?.start) || 0
+  const identityValues = [
+    metadata.title,
+    metadata.rawTitle,
+    metadata.artist,
+    ...(metadata.artistNames || []),
+    metadata.album,
+  ]
+    .map(normalizeLyricComparable)
+    .filter(Boolean)
+  if (
+    index <= 3 &&
+    start <= 3000 &&
+    identityValues.includes(normalizeLyricComparable(text))
+  ) {
+    return 'header'
+  }
   if (index <= 1 && start <= 20_000 && /\s[-–—]\s/.test(text)) {
     return 'header'
   }
@@ -103,6 +156,88 @@ export function longestCommonSubsequenceLength (left, right) {
     }
   }
   return row[right.length]
+}
+
+function lyricNgrams (text, size = 3) {
+  const values = new Set()
+  if (text.length < size) return values
+  for (let index = 0; index <= text.length - size; index++) {
+    values.add(text.slice(index, index + size))
+  }
+  return values
+}
+
+/**
+ * Compare two lyric resources without depending on identical line breaks or
+ * timestamps. Trigram containment tolerates punctuation, provider-specific
+ * wrapping, and an extra translation track, while the length/line guards keep
+ * a shared chorus from falsely validating an unrelated or incomplete lyric.
+ */
+export function timedLyricsAgreement (
+  leftLines,
+  rightLines,
+  { metadata = {} } = {},
+) {
+  const comparable = lines => filterLyricLines(lines || [], metadata).kept
+    .map(line => normalizeLyricComparable(line?.text ?? line))
+    .filter(Boolean)
+  const left = comparable(leftLines)
+  const right = comparable(rightLines)
+  const leftText = left.join('')
+  const rightText = right.join('')
+  const shorterCharacters = Math.min(leftText.length, rightText.length)
+  const longerCharacters = Math.max(leftText.length, rightText.length)
+  if (
+    left.length < 4 ||
+    right.length < 4 ||
+    shorterCharacters < 24
+  ) {
+    return {
+      confident: false,
+      confidence: 0,
+      containment: 0,
+      lengthBalance: longerCharacters
+        ? shorterCharacters / longerCharacters
+        : 0,
+      exactLineCoverage: 0,
+    }
+  }
+
+  const leftNgrams = lyricNgrams(leftText)
+  const rightNgrams = lyricNgrams(rightText)
+  const smaller = leftNgrams.size <= rightNgrams.size
+    ? leftNgrams
+    : rightNgrams
+  const larger = smaller === leftNgrams ? rightNgrams : leftNgrams
+  let overlap = 0
+  for (const value of smaller) {
+    if (larger.has(value)) overlap++
+  }
+  const containment = overlap / Math.max(1, smaller.size)
+  const lengthBalance = shorterCharacters / Math.max(1, longerCharacters)
+  const leftSet = new Set(left)
+  const rightSet = new Set(right)
+  const smallerLines = left.length <= right.length ? left : right
+  const otherLines = smallerLines === left ? rightSet : leftSet
+  const exactLineCoverage = smallerLines.filter(line => otherLines.has(line))
+    .length / Math.max(1, smallerLines.length)
+  const confidence = containment * (
+    0.75 + Math.min(1, lengthBalance) * 0.25
+  )
+  return {
+    confident: (
+      containment >= 0.72 &&
+      lengthBalance >= 0.34 &&
+      (
+        exactLineCoverage >= 0.2 ||
+        containment >= 0.86
+      )
+    ),
+    confidence,
+    containment,
+    lengthBalance,
+    exactLineCoverage,
+  }
 }
 
 function pairNearestLines (leftLines, rightLines, maximumDelta = 500) {

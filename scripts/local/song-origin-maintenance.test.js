@@ -168,6 +168,13 @@ test('startup maintenance refreshes a source-work title used for a Japanese anim
   })).toBe(true)
 })
 
+test('startup origin maintenance also covers non-QQ imported sources', () => {
+  expect(needsSongOriginRefresh({
+    subtitle: 'TV动画《示例作品》片头曲',
+    source: { service: 'netease' },
+  })).toBe(true)
+})
+
 test('a native Japanese direct title remains current even when it contains 後', () => {
   expect(needsSongOriginRefresh({
     title: 'license',

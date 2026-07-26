@@ -9,9 +9,6 @@ export const Black = Fill('black')
 export const Gray = Fill('#999')
 export const Gray2 = Fill('#A8A8A8')
 
-export const BadgeAudio = Fill('#003')
-export const BadgeVideo = Fill('#030')
-export const BadgeYouTube = Fill('#300')
 
 export const UIColor = Fill('#666').opacity('0.75')
 export const BtnBorder = Stroke(1, 'white')

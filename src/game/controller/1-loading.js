@@ -7,6 +7,31 @@ export default class LoadingController {
     this.game = game
   }
 
+  async waitForLocalLibraryReady (t) {
+    const deadline = Date.now() + 5 * 60 * 1000
+    while (Date.now() < deadline) {
+      let response
+      try {
+        response = await fetch('/api/local/status', { cache: 'no-store' })
+      } catch {
+        // Static deployments do not provide a local API.
+        return
+      }
+      if (!response.ok) return
+      const status = await response.json().catch(() => null)
+      if (!status?.available || !status.instance) return
+      if (!status.startup || status.startup.ready !== false) return
+      if (status.startup.state === 'error') {
+        throw new Error(
+          status.startup.error?.message || status.startup.message,
+        )
+      }
+      this.game.loading_screen.setSubText(t('loading.localLibrary'))
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+    throw new Error(t('loading.localLibraryTimeout'))
+  }
+
   // noinspection JSUnusedAssignment
   async run () {
     const t = this.game.i18n.t.bind(this.game.i18n)
@@ -74,6 +99,17 @@ export default class LoadingController {
     this.game.loading_screen.setSubText(t('loading.sfx'))
     for (const name of ['decide', 'error', 'exit', 'intro', 'key', 'ready', 'select', 'select2', 'skip']) {
       await this.game.sfx.registerSfx(name, packed_file.getFileAsBuffer(`sfx/${name}.wav`))
+    }
+
+    try {
+      await this.waitForLocalLibraryReady(t)
+    } catch (error) {
+      console.error('Unable to prepare the local song library.', error)
+      this.game.loading_screen.setMainText(t('loading.error'))
+      this.game.loading_screen.setSubText(t('loading.localLibraryError', {
+        reason: error.message,
+      }))
+      return false
     }
 
     // Load Song List

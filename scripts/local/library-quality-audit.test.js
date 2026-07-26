@@ -45,3 +45,20 @@ test('the audit requires pinyin for Chinese Han lyric lines', () => {
     expect.objectContaining({ code: 'chinese-pinyin-missing' }),
   ]))
 })
+
+test('the audit rejects an instrumental break attached to a short lyric', () => {
+  const csv = [
+    '0,2000,Keep moving',
+    '2000,4000,Sing it now',
+    '4000,11500,Stay',
+    '11500,13500,Come back',
+    '13500,15500,One more',
+  ].join('\n')
+  const result = auditLyricContent(metadata({ duration: 16 }), csv)
+
+  expect(result.issues).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      code: 'instrumental-gap-attached-to-lyric',
+    }),
+  ]))
+})

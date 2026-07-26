@@ -7,6 +7,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const execFile = promisify(childProcess.execFile)
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)))
 const DATA_DIRECTORY = path.join(ROOT, 'data')
+const BROWSER_RECORD = path.join(DATA_DIRECTORY, 'local-browser.json')
+const BROWSER_PROFILE = path.join(DATA_DIRECTORY, 'runtime', 'edge-profile')
 const PORT_RANGE = Array.from({ length: 21 }, (_, index) => 8765 + index)
 
 function normalizedPath (value) {
@@ -30,10 +32,47 @@ export function recordBelongsToProject (record, root = ROOT) {
   )
 }
 
+export function browserRecordBelongsToProject (record, root = ROOT) {
+  let url = null
+  try {
+    url = new URL(String(record?.url || ''))
+  } catch {}
+  return Boolean(
+    Number(record?.processId) > 0 &&
+    normalizedPath(record?.projectRoot) === normalizedPath(root) &&
+    normalizedPath(record?.profile) === normalizedPath(
+      path.join(root, 'data', 'runtime', 'edge-profile'),
+    ) &&
+    path.basename(String(record?.executable || '')).toLocaleLowerCase() ===
+      'msedge.exe' &&
+    url?.protocol === 'http:' &&
+    url.hostname === '127.0.0.1' &&
+    Number(url.port) >= 8765 &&
+    Number(url.port) <= 8785,
+  )
+}
+
+export function parseTasklistImage (text) {
+  const first = String(text || '').trim().split(/\r?\n/u)[0] || ''
+  const match = first.match(/^"([^"]+)","(\d+)"/u)
+  return match
+    ? { image: match[1], processId: Number(match[2]) }
+    : null
+}
+
 export function parseManagedRecord (text) {
   try {
     const record = JSON.parse(String(text || '').trim())
     return Number(record?.port) > 0 ? record : null
+  } catch {
+    return null
+  }
+}
+
+export function parseBrowserRecord (text) {
+  try {
+    const record = JSON.parse(String(text || '').trim())
+    return Number(record?.processId) > 0 ? record : null
   } catch {
     return null
   }
@@ -198,8 +237,67 @@ export async function terminateLocalServers () {
   return { stopped, failed }
 }
 
+export async function terminateGameBrowser () {
+  const record = parseBrowserRecord(
+    await fs.readFile(BROWSER_RECORD, 'utf8').catch(() => ''),
+  )
+  if (!browserRecordBelongsToProject(record)) {
+    return { stopped: false, found: false }
+  }
+  let running = null
+  try {
+    const { stdout } = await execFile(
+      'tasklist.exe',
+      [
+        '/FI',
+        `PID eq ${Number(record.processId)}`,
+        '/FO',
+        'CSV',
+        '/NH',
+      ],
+      {
+        windowsHide: true,
+        timeout: 3000,
+        maxBuffer: 256 * 1024,
+      },
+    )
+    running = parseTasklistImage(stdout)
+  } catch {}
+  if (!running) {
+    await fs.rm(BROWSER_RECORD, { force: true }).catch(() => {})
+    return { stopped: false, found: false }
+  }
+  if (
+    running.processId !== Number(record.processId) ||
+    running.image.toLocaleLowerCase() !== 'msedge.exe'
+  ) {
+    return { stopped: false, found: false }
+  }
+  try {
+    await execFile(
+      'taskkill.exe',
+      ['/PID', String(record.processId), '/T', '/F'],
+      {
+        windowsHide: true,
+        timeout: 5000,
+        maxBuffer: 256 * 1024,
+      },
+    )
+    await fs.rm(BROWSER_RECORD, { force: true }).catch(() => {})
+    return { stopped: true, found: true }
+  } catch {
+    return { stopped: false, found: true }
+  }
+}
+
 async function main () {
-  const { stopped, failed } = await terminateLocalServers()
+  const [
+    { stopped, failed },
+    browser,
+  ] = await Promise.all([
+    terminateLocalServers(),
+    terminateGameBrowser(),
+  ])
   if (stopped.length) {
     console.log(
       `Stopped TypingManiaNovel on port${
@@ -209,11 +307,20 @@ async function main () {
   } else if (!failed.length) {
     console.log('No TypingManiaNovel background service was running.')
   }
+  if (browser.stopped) {
+    console.log('Closed the TypingManiaNovel game window.')
+  }
   if (failed.length) {
     console.error(
       `TypingManiaNovel was found on port${
         failed.length === 1 ? '' : 's'
       } ${failed.join(', ')}, but Windows did not allow it to stop.`,
+    )
+    process.exitCode = 1
+  }
+  if (browser.found && !browser.stopped) {
+    console.error(
+      'The TypingManiaNovel game window was found, but Windows did not allow it to close.',
     )
     process.exitCode = 1
   }

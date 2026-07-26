@@ -11,14 +11,15 @@ npm install
 npm run start-local -- --open
 ```
 
-The Windows launcher checks
-the local service first, starts it in the background only when necessary, waits
-until the library scan is ready, and then opens the game in the default browser.
-It is safe to double-click again while the service is already running.
+The Windows launcher stops only a service previously started for this exact
+project directory, starts a fresh background service, and opens a dedicated
+Edge game window. The service binds immediately, and recovery/initial scanning
+finish on the game loading screen. Double-clicking again replaces that
+project-owned service and window without touching unrelated processes.
 
 ## Startup library scan
 
-Before serving the game, the local server recursively searches the project
+At startup, the local server recursively searches the project
 directory for `.typingmania` files. It reads only the package table and
 `song.json` during the scan, deduplicates songs by QQ Music song MID or by a
 canonical artist/title plus a five-second duration tolerance, and rebuilds
@@ -28,9 +29,11 @@ parenthetical title text is retained when uncertain, while explicit version,
 performance, mix, and numbering labels such as `Live`, `feat.`, `TV Version`,
 `Part 2`, or `Another ver.` remain visible and distinct.
 
-Before rebuilding the index, startup normalizes QQ Music package titles,
-removes unverified cross-language aliases, and revalidates anime origins that
-lack reliable provenance. Audio, lyrics, and cover bytes are preserved.
+Background maintenance normalizes QQ Music package titles, removes unverified
+cross-language aliases, corrects outdated lyric timing/quality metadata, and
+revalidates direct animation, film, television, documentary, commercial,
+variety, sports-event, visual-novel, JRPG, and game origins that lack reliable
+provenance. Audio and existing verified attachments are preserved.
 Removed aliases and raw dirty titles are not retained. Catalog results are
 cached locally, preserve each song's own role and episode numbers, and are
 skipped after repeated network failures.
@@ -40,18 +43,26 @@ The scan excludes `.git`, `node_modules`, `.agents`, `.codex`, and
 
 ## Add songs from QQ Music
 
-Choose **Add music**, then **QQ Music**, or press `Q` and select QQ Music.
+Choose **Add music**, then **QQ Music**, or press `Q` and select QQ Music from
+the provider list.
 
 The importer performs these checks in order:
 
 1. Confirm that `QQMusic.exe` is running and contains a logged-in session.
-2. Look for `QQMusicCache` in the project directory.
-3. Look for `QQMusicCache` at the root of each local/removable drive.
-4. Try cache paths found in QQ Music process memory, `QQMUSIC_CACHE_DIR`,
-   common user folders, and QQ Music configuration files.
-5. Sort cached `.mflac` files by modification time and continue scanning until
-   20 new, different, usable songs have been added or the cache is exhausted.
-6. Verify metadata and expected FLAC size with QQ Music's official service.
+2. Look for `QQMusicCache` and `QQMusicDownloads` in the project directory.
+3. Look for cache and download roots on each local/removable drive.
+4. Try paths found in QQ Music process memory, `QQMUSIC_CACHE_DIR`,
+   `QQMUSIC_DOWNLOAD_DIR`, common user folders, and QQ Music configuration.
+5. Show an in-game 1–500-song target menu (10 by default), sort cached/downloaded `.mflac` and `.mgg` files by
+   modification time, and continue until that many new, different, usable
+   songs have been added or the cache is exhausted.
+   Ordinary MP3, FLAC, M4A, AAC, MP4, OGG, and WAV downloads use the same
+   strict local-media workflow plus QQ Music's metadata, lyric, pronunciation,
+   cover, and origin checks. Provider identity must agree before a package is
+   written.
+6. Resolve a cache media MID through official metadata or an exact
+   QRC-title/artist search fallback, then verify identity and expected media
+   properties with QQ Music's official service.
 7. Separate a high-confidence cross-language title alias from the original
    title. Preserve real subtitles, versions, performances, mixes, and numbered
    parts; keep uncertain parentheticals unchanged.
@@ -60,7 +71,8 @@ The importer performs these checks in order:
    and select its single native primary name instead of a translated or alias
    list. Leave the artist blank if the original cannot be verified.
 9. Remove timed title, performer, lyricist, composer, arranger, and producer
-   rows before pairing lyrics with pronunciation.
+   rows before pairing lyrics with pronunciation. Reject instrumental/BGM,
+   no-lyrics placeholders, and timelines without substantial distinct vocals.
 10. Match every remaining lyric line one-to-one with the exact song's QRC Roma
     timeline. Word separators, sokuon apostrophes, and display-only symbols
     are removed from typing, while creative readings supplied by the karaoke
@@ -71,28 +83,31 @@ The importer performs these checks in order:
 12. Compare the complete normalized lyric sequence and, when supplied, the
     official online Roma sequence. A checked text or pronunciation mismatch is
     rejected.
-13. Parse anime openings, endings, insert songs, character songs, and image
-    songs into a structured work title, medium, season, episode, role, and
-    sequence. Prefer a verified Japanese soundtrack title from QQ Music;
-    otherwise query the public Bangumi anime catalog by the localized work
-    title. The mainland-accessible `bgm.tv` search page is tried before the
-    slower API endpoint. Exact original/localized/alias matches and tightly
-    bounded fuzzy matches are accepted, with season, TV/movie, song-title, and
-    performer evidence used to rank ambiguities.
-14. For anime openings, endings, insert songs, character songs, and image
-    songs, search QQ Music by the exact title and performer and prefer an album
-    matching the anime work or soundtrack. Otherwise use the track's exact
-    official 500×500 album cover, with a validated local cover as fallback.
-15. Fetch the per-song ekey, decrypt QMC2 audio in memory, validate the FLAC,
-    and create a local `.typingmania` package.
+13. Parse animation, film, television, documentary, commercial, variety,
+    sports-event, visual-novel, JRPG, game, and other soundtrack credits into
+    a structured direct work title, medium, season, episode, role, and
+    sequence. Official/provider evidence is checked first, then specialist
+    catalogs, encyclopedic cross-checks, and verified official media.
+    AniSongDB/Bangumi verify anime; Bangumi, TVmaze, optional TMDB, and a
+    fail-closed Wikidata route cover other productions. A manga, novel, or
+    other pre-adaptation work is never substituted for the direct production.
+14. For screen-related songs, search QQ Music by the exact title and performer
+    and prefer an album matching the direct work or soundtrack. Otherwise use
+    the track's exact official 500×500 album cover, then a validated local
+    cover. If no optional artwork can be proved, use the neutral bundled image.
+15. Fetch the per-song ekey, decrypt QMC2 audio in memory, detect the resulting
+    FLAC, OGG, MP3, or MP4 container, validate full duration, and create a
+    local `.typingmania` package. A cache entry that the signed-in account
+    cannot access is reported and skipped without stopping eligible free tracks.
 
-Incomplete audio, missing pronunciation, incomplete text, metadata mismatches,
-and invalid images are skipped instead of being added to the library. Already
+Incomplete audio, missing pronunciation, incomplete or insubstantial vocal
+text, and metadata mismatches are skipped instead of being added to the
+library. Missing optional images alone do not reject a playable song. Already
 validated songs are skipped by their stored media MID before any network work
 when possible. Existing songs, duplicate candidates, rejected candidates, and
-packages that require a quality refresh do not consume the batch's 20 new-song
-slots. Clicking the menu action again therefore adds the next 20 validated
-songs rather than stopping at the first 20 cached entries.
+packages that require a quality refresh do not consume the selected new-song
+target. Clicking the menu action again therefore continues with the next
+validated songs rather than stopping at the first cached entries.
 
 ### Automatic lyric reconciliation
 
@@ -111,6 +126,9 @@ Reconciliation is deterministic and requires no user choices:
 6. Validate both directions of the complete text sequence at 99.5% coverage,
    validate every Roma syllable timeline, and choose the highest-scoring
    candidate.
+7. Measure normal milliseconds per playable key for this recording and cap
+   only statistically obvious long line windows, preventing a following
+   instrumental break from becoming typing time for the previous lyric.
 
 If confidence is insufficient, the candidate is discarded and the importer
 continues looking for another cached song. If the online service is temporarily
@@ -146,8 +164,8 @@ an explicitly labeled release edition, but cannot by itself invent or
 translate a title. A localized catalog label, an old unverified origin, or the
 raw Chinese QQ Music subtitle is not displayed.
 
-The resolver caches results in the Git-ignored
-`data/qqmusic-origin-cache.json`. Packages without current origin metadata are
+The shared resolver caches results in the Git-ignored
+`data/song-origin-cache.json`. Packages without current origin metadata are
 revalidated when the importer encounters them; audio, lyrics, and cover bytes
 are preserved. If the catalog cannot be reached twice in one import, remaining
 catalog lookups are skipped for that batch. A strong QQ Music soundtrack-title
@@ -185,25 +203,25 @@ provenance inside the private generated package/cache; it is never used as the
 displayed fallback. This makes loss of enrichment visible without silently
 presenting a translation as the original.
 
-### Cover selection and network fallback
+### Artwork selection and network fallback
 
-Anime-related cover matching requires an exact song title and performer match,
-then ranks albums by the anime work name and soundtrack/theme-song wording.
+Screen-related cover matching requires an exact song title and performer
+match, then ranks albums by the direct work name and soundtrack/theme-song wording.
 Live, remix, karaoke, unrelated cover, and performance-video results are
 penalized. The exact track album remains the fallback, followed by a validated
 local `QQMusicPicture` image. The selected strategy and album MID are recorded
-in `song.json`. When a verified Bangumi subject ID is available, the importer
-also reads the current subject page and API record, verifies that the direct
-production title or one of its explicitly labeled release titles matches the
-stored origin, and only then downloads its current large poster. The poster is
+in `song.json`. When a verified Bangumi, TVmaze, TMDB, or Wikidata production record is
+available, the importer verifies that the direct production title or one of
+its explicitly labeled release titles matches the stored origin, and only then
+downloads its current large poster. The poster is
 used as the full background and the validated QQ Music album artwork remains
 visible as a separate cover card: upper-left during song selection and
 upper-right during gameplay. A missing, mismatched, or unreachable poster
 never blocks the song.
 
 Poster validation has its own version and timestamp. It is repeated after 30
-days because entries for upcoming anime are often created with provisional
-artwork and updated near broadcast. Packages are rewritten atomically when a
+days because upcoming production entries often start with provisional
+artwork. Packages are rewritten atomically when a
 due check succeeds, preserving their album cover, audio, and lyrics. Startup
 performs only due checks in the background; repeated catalog failures defer
 the remaining optional work rather than delaying play.
@@ -212,7 +230,7 @@ To refresh artwork in local packages without rebuilding audio or lyrics, run:
 
 ```sh
 npm run refresh-qqmusic-covers
-npm run refresh-qqmusic-posters
+npm run refresh-media-posters
 ```
 
 QQ Music requests use domestic `qq.com` and `gtimg.cn` services with one
@@ -222,28 +240,30 @@ skips the same enhancement for the rest of the batch and the importer
 continues with local data. Repeated required metadata or ekey failures stop the
 batch with a clear network message instead of hanging.
 
-Original-work and subject-page lookup tries Bangumi's three official website
-domains—`bgm.tv`, `bangumi.tv`, and `chii.in`—within one shared short budget,
-then falls back to `api.bgm.tv`. Poster download can also fall back to the
-official subject-image API route. Exhausting those routes disables optional
-catalog enrichment for the rest of the batch. It hides the origin or poster
-instead of delaying or rejecting a playable local song. Official online lyric
-comparison is optional when the stricter local QRC/Roma reconciliation already
-proves a complete match.
+Network lookup starts from a regional profile inferred from system locale/time
+zone or `TMN_NETWORK_REGION`, then reorders sources by live success, failure
+cooldown, and latency. Mainland profiles start with QQ Music, NetEase, KuGou,
+and Bangumi; other profiles can prefer LRCLIB, iTunes Search, MusicBrainz,
+TVmaze, TMDB, and Wikidata. Mainland China, Hong Kong/Macau, Taiwan, Japan,
+South Korea, Southeast Asia, the United States, Europe, and global profiles
+have separate safe starting orders. Bangumi's `bgm.tv`, `bangumi.tv`,
+`chii.in`, and API routes share one short budget. Exhausting optional routes hides an uncertain origin
+or poster instead of delaying or rejecting a playable local song. Official
+online lyric comparison is optional when stricter local QRC/Roma
+reconciliation already proves a complete match.
 
 ## Restoring the starter library
 
-Choose **Restore starter library** in the main menu, or press `D`. A compact
-dialog requires a second confirmation before anything is changed. The local
-service then restores the baseline declared in
+Choose **Reset library** in the main menu, select all imported sources or one
+provider, and confirm in the compact dialog. A full reset restores the baseline declared in
 `scripts/local/library-baseline.js`: exactly three checksum-verified Chinese,
 English, and Japanese starter packages.
 
 The reset removes every other `.typingmania` package found under the game
-directory, including invalid packages, plus generated `data/qqmusic`, the
-private origin lookup cache, and generated trial data. Browser-side high scores
-are cleared and `data/songs.json` is rebuilt. If any starter package is missing
-or changed, all three are rebuilt and checked against their recorded SHA-256
+directory, including invalid packages, plus generated provider directories,
+private lookup caches, and generated trial data. Browser-side high scores are
+cleared and `data/songs.json` is rebuilt. If any starter package is missing or
+changed, all three are rebuilt and checked against their recorded SHA-256
 values before the reset proceeds.
 
 The scanner skips symbolic links and excludes every directory named
@@ -289,4 +309,5 @@ Redistributing open-source runtime code requires keeping its license and
 copyright text, not merely naming it in the README. The complete inventory and
 license locations are in `THIRD-PARTY-NOTICES.md`. The conversion library's
 open-source license does not grant rights to QQ Music software or content; see
-`QQMUSIC-INTEROPERABILITY-NOTICE.md` before distributing the importer.
+`QQMUSIC-INTEROPERABILITY-NOTICE.md` and
+`MUSIC-SERVICE-INTEROPERABILITY-NOTICE.md` before distributing an importer.

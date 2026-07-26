@@ -8,7 +8,6 @@ import { fileURLToPath } from 'node:url'
 
 import {
   rebuildSongIndex,
-  resetLibraryToBaseline,
 } from './local/library.js'
 import {
   deleteLibrarySongs,
@@ -16,14 +15,31 @@ import {
   pruneUnusedLibraryCaches,
   recoverLibraryEditTransactions,
 } from './local/library-editor.js'
-import { importRecentQQMusicSongs } from './local/qqmusic-importer.js'
-import { refreshQQMusicLyricsAndPace } from './local/lyrics-maintenance.js'
+import { inspectLibraryDuplicates } from './local/library-deduplication.js'
 import {
-  refreshOutdatedAnimePosters,
+  musicImportProvider,
+  musicImportProviderIds,
+} from './local/music-import-providers.js'
+import { refreshImportedLibraryMetadata } from './local/library-metadata-maintenance.js'
+import { resetLibraryScope } from './local/library-reset.js'
+import {
+  createUploadSession,
+  disposeUploadSession,
+  getUploadSession,
+  receiveUploadFile,
+} from './local/upload-sessions.js'
+import { refreshImportedLyricsAndPace } from './local/lyrics-maintenance.js'
+import {
+  refreshOutdatedMediaPosters,
 } from './local/poster-maintenance.js'
+import { hideUnverifiedLocalizedArtistNames } from './local/artist-maintenance.js'
 import { refreshMissingSongOrigins } from './local/song-origin-maintenance.js'
 import { refreshQQMusicSongTitles } from './local/song-title-maintenance.js'
 import { readPackedSongArtwork } from './local/packed-song-reader.js'
+import {
+  resolveMusicVideoFile,
+  resolveSongMusicVideo,
+} from './local/mv-resolver.js'
 
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)))
 const args = new Set(process.argv.slice(2))
@@ -31,10 +47,27 @@ const portArgument = process.argv.find(argument => argument.startsWith('--port='
 const PORT = Number(portArgument?.split('=')[1] || process.env.TMN_PORT || 8765)
 const HOST = '127.0.0.1'
 const SESSION_TOKEN = crypto.randomBytes(24).toString('base64url')
-const INSTANCE_PROTOCOL = 1
+const INSTANCE_PROTOCOL = 3
+const SERVER_STARTED_AT = new Date().toISOString()
+
+function latestServerSourceVersion () {
+  const files = [fileURLToPath(import.meta.url)]
+  const visit = directory => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const filename = path.join(directory, entry.name)
+      if (entry.isDirectory()) visit(filename)
+      else if (entry.isFile() && path.extname(entry.name) === '.js') files.push(filename)
+    }
+  }
+  visit(path.join(ROOT, 'scripts', 'local'))
+  return Math.max(...files.map(filename => Math.trunc(fs.statSync(filename).mtimeMs)))
+}
+
+const SERVER_SOURCE_VERSION = latestServerSourceVersion()
 
 const MIME_TYPES = {
   '.avif': 'image/avif',
+  '.aac': 'audio/aac',
   '.css': 'text/css; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8',
   '.dat': 'application/octet-stream',
@@ -47,10 +80,14 @@ const MIME_TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.mp4': 'video/mp4',
+  '.ogg': 'audio/ogg',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.typingmania': 'application/octet-stream',
   '.wav': 'audio/wav',
+  '.webm': 'video/webm',
   '.webp': 'image/webp',
   '.woff2': 'font/woff2',
 }
@@ -61,8 +98,18 @@ let libraryStatus = {
   invalidFiles: 0,
   lastScan: null,
 }
+let startupStatus = {
+  state: 'starting',
+  phase: 'binding',
+  message: 'Starting the local service...',
+  ready: false,
+  error: null,
+  startedAt: SERVER_STARTED_AT,
+  completedAt: null,
+}
 let importJob = {
   state: 'idle',
+  provider: null,
   phase: 'idle',
   message: 'Ready',
   result: null,
@@ -70,12 +117,54 @@ let importJob = {
   startedAt: null,
   completedAt: null,
 }
+let importAbortController = null
 let libraryMutationRunning = false
 let startupMaintenance = Promise.resolve()
+let startupBackgroundRunning = false
 let originMaintenanceRunning = false
+let metadataMaintenanceRunning = false
+let metadataRefreshJob = {
+  state: 'idle',
+  message: 'Ready',
+  result: null,
+  error: null,
+  startedAt: null,
+  completedAt: null,
+}
+let metadataAbortController = null
 
 function publicJob () {
   return JSON.parse(JSON.stringify(importJob))
+}
+
+function publicMetadataJob () {
+  return JSON.parse(JSON.stringify(metadataRefreshJob))
+}
+
+function publicStartupStatus () {
+  return JSON.parse(JSON.stringify(startupStatus))
+}
+
+function updateStartupStatus (values) {
+  startupStatus = { ...startupStatus, ...values }
+}
+
+function libraryIsBusy () {
+  return Boolean(
+    importJob.state === 'running' ||
+    libraryMutationRunning ||
+    startupBackgroundRunning ||
+    originMaintenanceRunning ||
+    metadataMaintenanceRunning
+  )
+}
+
+function importCannotStart () {
+  return Boolean(
+    importJob.state === 'running' ||
+    libraryMutationRunning ||
+    metadataMaintenanceRunning
+  )
 }
 
 function sendJson (response, status, value) {
@@ -122,11 +211,23 @@ async function readJsonBody (request) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 
-function startImportJob (limit) {
+function startImportJob (providerId, options = {}) {
+  const provider = musicImportProvider(providerId)
+  if (!provider) throw new Error(`Unknown music import provider: ${providerId}`)
+  const maximumBatchSize = Math.min(
+    500,
+    Number(provider.maximumBatchSize) || 500,
+  )
+  const limit = Math.max(1, Math.min(
+    maximumBatchSize,
+    Number(options.limit) || Math.min(10, maximumBatchSize),
+  ))
+  importAbortController = new AbortController()
   importJob = {
     state: 'running',
+    provider: provider.id,
     phase: 'starting',
-    message: 'Starting QQ Music import...',
+    message: `Starting ${provider.label} import...`,
     result: null,
     error: null,
     startedAt: new Date().toISOString(),
@@ -135,9 +236,13 @@ function startImportJob (limit) {
 
   startupMaintenance
     .catch(() => {})
-    .then(() => importRecentQQMusicSongs({
+    .then(() => provider.importSongs({
       root: ROOT,
       limit,
+      urls: options.urls,
+      sessionId: options.sessionId,
+      signal: importAbortController.signal,
+      shouldCancel: () => importAbortController?.signal.aborted === true,
       onProgress: progress => {
         importJob = { ...importJob, ...progress, state: 'running' }
       },
@@ -164,15 +269,98 @@ function startImportJob (limit) {
         completedAt: new Date().toISOString(),
       }
     }).catch(error => {
+      if (importAbortController?.signal.aborted) {
+        const result = error.result || importJob.result || {
+          requested: limit,
+          imported: 0,
+          refreshed: 0,
+          skipped: 0,
+          duplicates: 0,
+          failed: 0,
+          failures: [],
+          cancelled: true,
+        }
+        result.cancelled = true
+        importJob = {
+          ...importJob,
+          state: 'complete',
+          phase: 'cancelled',
+          message: 'Import stopped; completed songs were kept.',
+          result,
+          error: null,
+          completedAt: new Date().toISOString(),
+        }
+        return
+      }
       importJob = {
         ...importJob,
         state: 'error',
         phase: 'error',
-        message: error.message || 'QQ Music import failed.',
-        result: null,
-        error: { code: error.code || 'QQMUSIC_IMPORT_FAILED', message: error.message },
+        message: error.message || `${provider.label} import failed.`,
+        result: error.result || null,
+        error: {
+          code: error.code || 'MUSIC_IMPORT_FAILED',
+          message: error.message,
+        },
         completedAt: new Date().toISOString(),
       }
+    }).finally(() => {
+      importAbortController = null
+    })
+}
+
+function startMetadataRefreshJob () {
+  metadataAbortController = new AbortController()
+  metadataMaintenanceRunning = true
+  metadataRefreshJob = {
+    state: 'running',
+    message: 'Checking imported song metadata...',
+    result: null,
+    error: null,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+  }
+  startupMaintenance
+    .catch(() => {})
+    .then(() => refreshImportedLibraryMetadata({
+      root: ROOT,
+      signal: metadataAbortController.signal,
+      shouldCancel: () => metadataAbortController?.signal.aborted === true,
+      onProgress: progress => {
+        metadataRefreshJob = {
+          ...metadataRefreshJob,
+          ...progress,
+          state: 'running',
+        }
+      },
+    }))
+    .then(async result => {
+      await refreshLibrary()
+      metadataRefreshJob = {
+        ...metadataRefreshJob,
+        state: 'complete',
+        message: `Updated ${result.updated} imported song records.`,
+        result,
+        error: null,
+        completedAt: new Date().toISOString(),
+      }
+    })
+    .catch(error => {
+      metadataRefreshJob = {
+        ...metadataRefreshJob,
+        state: 'error',
+        message: error.message || 'Song metadata update failed.',
+        result: null,
+        error: {
+          code: error.code || 'METADATA_REFRESH_FAILED',
+          message: error.message,
+        },
+        completedAt: new Date().toISOString(),
+      }
+    })
+    .finally(() => {
+      metadataMaintenanceRunning = false
+      metadataAbortController = null
     })
 }
 
@@ -223,6 +411,55 @@ async function sendSongArtwork (request, response, url) {
   }
 }
 
+async function sendMusicVideo (request, response, url) {
+  if (!sameOrigin(request)) {
+    return sendJson(response, 403, { error: 'Forbidden' })
+  }
+  const filename = await resolveMusicVideoFile(
+    ROOT,
+    url.searchParams.get('key'),
+  )
+  if (!filename) return sendJson(response, 404, { error: 'MV not found' })
+  const stat = await fsp.stat(filename)
+  const type = MIME_TYPES[path.extname(filename).toLocaleLowerCase()] ||
+    'video/mp4'
+  const range = String(request.headers.range || '')
+  const match = range.match(/^bytes=(\d*)-(\d*)$/u)
+  if (!match) {
+    response.writeHead(200, {
+      'Content-Type': type,
+      'Content-Length': stat.size,
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'private, max-age=3600',
+      'X-Content-Type-Options': 'nosniff',
+    })
+    return fs.createReadStream(filename).pipe(response)
+  }
+  const start = match[1] ? Number(match[1]) : 0
+  const end = match[2]
+    ? Math.min(Number(match[2]), stat.size - 1)
+    : stat.size - 1
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end < start ||
+    start >= stat.size
+  ) {
+    response.writeHead(416, { 'Content-Range': `bytes */${stat.size}` })
+    return response.end()
+  }
+  response.writeHead(206, {
+    'Content-Type': type,
+    'Content-Length': end - start + 1,
+    'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'private, max-age=3600',
+    'X-Content-Type-Options': 'nosniff',
+  })
+  fs.createReadStream(filename, { start, end }).pipe(response)
+}
+
 async function handleApi (request, response, url) {
   const pathname = url.pathname
   if (
@@ -231,30 +468,97 @@ async function handleApi (request, response, url) {
   ) {
     return sendSongArtwork(request, response, url)
   }
+  if (
+    request.method === 'GET' &&
+    pathname === '/api/local/music-video'
+  ) {
+    return sendMusicVideo(request, response, url)
+  }
   if (request.method === 'GET' && pathname === '/api/local/status') {
     return sendJson(response, 200, {
       available: true,
       instance: {
         protocol: INSTANCE_PROTOCOL,
         root: ROOT,
+        sourceVersion: SERVER_SOURCE_VERSION,
+        startedAt: SERVER_STARTED_AT,
         features: [
           'keyfall-predictive',
           'library-editor',
+          'library-deduplication',
+          'local-folder-import',
+          'metadata-refresh',
+          'music-import-providers',
+          'music-video-cache',
+          'scoped-library-reset',
           'song-artwork-preview',
+          'startup-readiness',
           'graceful-shutdown',
         ],
       },
       token: SESSION_TOKEN,
-      library: libraryStatus,
+      startup: publicStartupStatus(),
+      library: {
+        ...libraryStatus,
+        ready: startupStatus.ready,
+      },
       import: publicJob(),
+      importProviders: musicImportProviderIds(),
       maintenance: {
+        startup: startupBackgroundRunning,
         origin: originMaintenanceRunning,
+        metadata: metadataMaintenanceRunning,
       },
     })
   }
   if (request.method === 'GET' && pathname === '/api/qqmusic/import/status') {
     if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
     return sendJson(response, 200, publicJob())
+  }
+  if (request.method === 'GET' && pathname === '/api/music-import/status') {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    return sendJson(response, 200, publicJob())
+  }
+  if (request.method === 'POST' && pathname === '/api/music-import/cancel') {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    if (importJob.state !== 'running' || !importAbortController) {
+      return sendJson(response, 200, { cancelling: false, job: publicJob() })
+    }
+    importAbortController.abort()
+    importJob = {
+      ...importJob,
+      phase: 'cancelling',
+      message: 'Stopping after the current safe checkpoint...',
+    }
+    return sendJson(response, 202, { cancelling: true, job: publicJob() })
+  }
+  if (
+    request.method === 'GET' &&
+    pathname === '/api/library/metadata-refresh/status'
+  ) {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    return sendJson(response, 200, publicMetadataJob())
+  }
+  if (
+    request.method === 'POST' &&
+    pathname === '/api/library/metadata-refresh/cancel'
+  ) {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    if (metadataRefreshJob.state !== 'running' || !metadataAbortController) {
+      return sendJson(response, 200, {
+        cancelling: false,
+        job: publicMetadataJob(),
+      })
+    }
+    metadataAbortController.abort()
+    metadataRefreshJob = {
+      ...metadataRefreshJob,
+      message: 'Stopping after the current safe checkpoint...',
+    }
+    return sendJson(response, 202, {
+      cancelling: true,
+      job: publicMetadataJob(),
+    })
   }
   if (request.method === 'POST' && pathname === '/api/local/shutdown') {
     if (!authorized(request)) {
@@ -268,16 +572,98 @@ async function handleApi (request, response, url) {
     })
     return
   }
-  if (request.method === 'POST' && pathname === '/api/qqmusic/import') {
+  if (request.method === 'POST' && pathname === '/api/music-video/resolve') {
     if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
-    if (importJob.state === 'running') return sendJson(response, 409, publicJob())
     try {
       const body = await readJsonBody(request)
-      const limit = Math.max(1, Math.min(20, Number(body.limit) || 20))
-      startImportJob(limit)
+      const filename = resolveSongPackage(body.songUrl)
+      if (!filename) {
+        return sendJson(response, 400, { error: 'Invalid song package' })
+      }
+      const result = await resolveSongMusicVideo({
+        root: ROOT,
+        songFilename: filename,
+      })
+      return sendJson(response, 200, result.available
+        ? {
+            ...result,
+            url: `/api/local/music-video?key=${encodeURIComponent(result.key)}`,
+          }
+        : result)
+    } catch (error) {
+      return sendJson(response, 200, {
+        available: false,
+        reason: error?.message || 'MV lookup failed',
+      })
+    }
+  }
+  if (request.method === 'POST' && pathname === '/api/local-folder/session') {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    if (importJob.state === 'running') return sendJson(response, 409, publicJob())
+    return sendJson(response, 201, await createUploadSession())
+  }
+  if (request.method === 'PUT' && pathname === '/api/local-folder/file') {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    const session = getUploadSession(url.searchParams.get('session'), {
+      requireOpen: true,
+    })
+    if (!session) return sendJson(response, 404, { error: 'Upload session not found' })
+    try {
+      const result = await receiveUploadFile(
+        request,
+        session,
+        url.searchParams.get('path'),
+      )
+      return sendJson(response, 200, result)
+    } catch (error) {
+      return sendJson(response, 400, { error: error.message })
+    }
+  }
+  if (request.method === 'DELETE' && pathname === '/api/local-folder/session') {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    const session = getUploadSession(url.searchParams.get('session'))
+    if (!session) return sendJson(response, 200, { disposed: false })
+    await disposeUploadSession(session)
+    return sendJson(response, 200, { disposed: true })
+  }
+  if (request.method === 'POST' && pathname === '/api/qqmusic/import') {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    if (importCannotStart()) {
+      return sendJson(response, 409, publicJob())
+    }
+    try {
+      const body = await readJsonBody(request)
+      const limit = Math.max(1, Math.min(500, Number(body.limit) || 10))
+      startImportJob('qqmusic', { limit })
       return sendJson(response, 202, publicJob())
     } catch (error) {
       return sendJson(response, 400, { error: error.message })
+    }
+  }
+  if (request.method === 'POST' && pathname.startsWith('/api/music-import/')) {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    if (importCannotStart()) {
+      return sendJson(response, 409, publicJob())
+    }
+    try {
+      const providerId = decodeURIComponent(
+        pathname.slice('/api/music-import/'.length),
+      )
+      if (!musicImportProvider(providerId)) {
+        return sendJson(response, 404, { error: 'Unknown music import provider' })
+      }
+      const body = await readJsonBody(request)
+      startImportJob(providerId, {
+        limit: body.limit,
+        urls: Array.isArray(body.urls) ? body.urls.slice(0, 20) : [],
+        sessionId: body.sessionId,
+      })
+      return sendJson(response, 202, publicJob())
+    } catch (error) {
+      return sendJson(response, 400, {
+        code: error.code,
+        error: error.message,
+      })
     }
   }
   if (request.method === 'POST' && pathname === '/api/library/rescan') {
@@ -285,17 +671,31 @@ async function handleApi (request, response, url) {
     await refreshLibrary()
     return sendJson(response, 200, libraryStatus)
   }
+  if (
+    request.method === 'POST' &&
+    pathname === '/api/library/metadata-refresh'
+  ) {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    if (libraryIsBusy()) {
+      return sendJson(response, 409, publicMetadataJob())
+    }
+    startMetadataRefreshJob()
+    return sendJson(response, 202, publicMetadataJob())
+  }
   if (request.method === 'GET' && pathname === '/api/library/editable') {
     if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
     return sendJson(response, 200, await inspectEditableLibrary(ROOT))
   }
+  if (request.method === 'GET' && pathname === '/api/library/duplicates') {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    if (libraryIsBusy()) {
+      return sendJson(response, 409, { error: 'The local library is busy' })
+    }
+    return sendJson(response, 200, await inspectLibraryDuplicates(ROOT))
+  }
   if (request.method === 'POST' && pathname === '/api/library/delete') {
     if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
-    if (
-      importJob.state === 'running' ||
-      libraryMutationRunning ||
-      originMaintenanceRunning
-    ) {
+    if (libraryIsBusy()) {
       return sendJson(response, 409, { error: 'The local library is busy' })
     }
     try {
@@ -319,20 +719,17 @@ async function handleApi (request, response, url) {
   }
   if (request.method === 'POST' && pathname === '/api/library/reset') {
     if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
-    if (
-      importJob.state === 'running' ||
-      libraryMutationRunning ||
-      originMaintenanceRunning
-    ) {
+    if (libraryIsBusy()) {
       return sendJson(response, 409, { error: 'The local library is busy' })
     }
     try {
       const body = await readJsonBody(request)
-      if (body.confirm !== 'RESTORE_STARTER_LIBRARY') {
+      const scope = String(body.scope || 'all')
+      if (body.confirm !== 'RESET_LIBRARY_SCOPE') {
         return sendJson(response, 400, { error: 'Explicit confirmation is required' })
       }
       libraryMutationRunning = true
-      const result = await resetLibraryToBaseline(ROOT)
+      const result = await resetLibraryScope(ROOT, scope)
       await refreshLibrary()
       return sendJson(response, result.restored ? 200 : 207, result)
     } finally {
@@ -399,45 +796,85 @@ const server = http.createServer(async (request, response) => {
   }
 })
 
-await recoverLibraryEditTransactions(ROOT)
-await pruneUnusedLibraryCaches(ROOT).catch(() => {})
-const titleMaintenance = await refreshQQMusicSongTitles({
-  root: ROOT,
-  onProgress: progress => {
-    console.log(`Original song titles: ${progress.inspected}/${progress.total}`)
-  },
-})
-if (titleMaintenance.inspected) {
-  console.log(
-    `Original song titles: ${titleMaintenance.refreshed} refreshed, ` +
-    `${titleMaintenance.failed} failed`,
-  )
+async function prepareLocalLibrary () {
+  updateStartupStatus({
+    phase: 'recovering-library',
+    message: 'Checking the local song library...',
+  })
+  await recoverLibraryEditTransactions(ROOT)
+  await pruneUnusedLibraryCaches(ROOT).catch(error => {
+    console.warn(`Unable to prune an unused library cache: ${error.message}`)
+  })
+  updateStartupStatus({
+    phase: 'scanning-library',
+    message: 'Scanning playable songs...',
+  })
+  await refreshLibrary()
+  updateStartupStatus({
+    state: 'ready',
+    phase: 'ready',
+    message: 'Ready',
+    ready: true,
+    error: null,
+    completedAt: new Date().toISOString(),
+  })
 }
-const lyricsMaintenance = await refreshQQMusicLyricsAndPace({
-  root: ROOT,
-  onProgress: progress => {
-    console.log(`Lyrics and reference pace: ${progress.inspected}/${progress.total}`)
-  },
-})
-if (lyricsMaintenance.inspected) {
-  console.log(
-    `Lyrics and reference pace: ${lyricsMaintenance.refreshed} refreshed, ` +
-    `${lyricsMaintenance.removed} non-lyric line(s) removed, ` +
-    `${lyricsMaintenance.failed} failed`,
-  )
-}
-await refreshLibrary()
-server.listen(PORT, HOST, () => {
-  const url = `http://${HOST}:${PORT}/`
-  console.log(`TypingManiaNovel local server: ${url}`)
-  console.log(`Library: ${libraryStatus.songs} song(s), ${libraryStatus.invalidFiles} invalid package(s)`)
-  originMaintenanceRunning = true
-  startupMaintenance = refreshMissingSongOrigins({
-    root: ROOT,
-    onProgress: progress => {
-      console.log(`Original work titles: ${progress.inspected}/${progress.total}`)
-    },
-  }).then(async originMaintenance => {
+
+async function maintainLocalLibrary () {
+  startupBackgroundRunning = true
+  try {
+    const artistCleanup = await hideUnverifiedLocalizedArtistNames({
+      root: ROOT,
+      onProgress: progress => {
+        console.log(
+          `Unverified localized artist aliases: ` +
+          `${progress.inspected}/${progress.total}`,
+        )
+      },
+    })
+    if (artistCleanup.inspected) {
+      console.log(
+        `Unverified localized artist aliases: ${artistCleanup.hidden} hidden, ` +
+        `${artistCleanup.failed} failed`,
+      )
+      await refreshLibrary()
+    }
+    const titleMaintenance = await refreshQQMusicSongTitles({
+      root: ROOT,
+      onProgress: progress => {
+        console.log(`Original song titles: ${progress.inspected}/${progress.total}`)
+      },
+    })
+    if (titleMaintenance.inspected) {
+      console.log(
+        `Original song titles: ${titleMaintenance.refreshed} refreshed, ` +
+        `${titleMaintenance.failed} failed`,
+      )
+    }
+    const lyricsMaintenance = await refreshImportedLyricsAndPace({
+      root: ROOT,
+      onProgress: progress => {
+        console.log(`Lyrics and reference pace: ${progress.inspected}/${progress.total}`)
+      },
+    })
+    if (lyricsMaintenance.inspected) {
+      console.log(
+        `Imported lyrics and reference pace: ${lyricsMaintenance.refreshed} refreshed, ` +
+        `${lyricsMaintenance.removed} non-lyric line(s) removed, ` +
+        `${lyricsMaintenance.failed} failed`,
+      )
+    }
+    if (titleMaintenance.refreshed || lyricsMaintenance.refreshed) {
+      await refreshLibrary()
+    }
+
+    originMaintenanceRunning = true
+    const originMaintenance = await refreshMissingSongOrigins({
+      root: ROOT,
+      onProgress: progress => {
+        console.log(`Original work titles: ${progress.inspected}/${progress.total}`)
+      },
+    })
     if (originMaintenance.inspected) {
       console.log(
         `Original work titles: ${originMaintenance.refreshed} refreshed, ` +
@@ -446,28 +883,61 @@ server.listen(PORT, HOST, () => {
       )
       await refreshLibrary()
     }
-    const posterMaintenance = await refreshOutdatedAnimePosters({
+    const posterMaintenance = await refreshOutdatedMediaPosters({
       root: ROOT,
       onProgress: progress => {
         console.log(
-          `Verified anime posters: ${progress.inspected}/${progress.total}`,
+          `Verified media posters: ${progress.inspected}/${progress.total}`,
         )
       },
     })
     if (posterMaintenance.inspected) {
       console.log(
-        `Verified anime posters: ${posterMaintenance.refreshed} refreshed, ` +
+        `Verified media posters: ${posterMaintenance.refreshed} refreshed, ` +
         `${posterMaintenance.removed} removed, ` +
         `${posterMaintenance.unavailable} deferred, ` +
         `${posterMaintenance.failed} failed`,
       )
       await refreshLibrary()
     }
-    return { originMaintenance, posterMaintenance }
-  }).catch(error => {
-    console.error(`Original work title maintenance failed: ${error.message}`)
-  }).finally(() => {
+    return {
+      titleMaintenance,
+      lyricsMaintenance,
+      originMaintenance,
+      posterMaintenance,
+    }
+  } finally {
     originMaintenanceRunning = false
+    startupBackgroundRunning = false
+  }
+}
+
+server.listen(PORT, HOST, () => {
+  const url = `http://${HOST}:${PORT}/`
+  console.log(`TypingManiaNovel local server: ${url}`)
+  startupMaintenance = prepareLocalLibrary().then(() => {
+    console.log(
+      `Library: ${libraryStatus.songs} song(s), ` +
+      `${libraryStatus.invalidFiles} invalid package(s)`,
+    )
+    return maintainLocalLibrary().catch(error => {
+      console.error(
+        `Background library maintenance failed: ${error.stack || error.message}`,
+      )
+    })
+  }).catch(error => {
+    updateStartupStatus({
+      state: 'error',
+      phase: 'error',
+      message: 'Unable to prepare the local song library.',
+      ready: false,
+      error: {
+        code: error.code || 'LOCAL_LIBRARY_STARTUP_FAILED',
+        message: error.message,
+      },
+      completedAt: new Date().toISOString(),
+    })
+    console.error(`Local library startup failed: ${error.stack || error.message}`)
   })
   if (args.has('--open')) {
     if (process.platform === 'win32') {

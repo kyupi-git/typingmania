@@ -1,4 +1,5 @@
 export const KEY_EFFECTS_STORAGE_KEY = 'typingmania:preferences:key-effects'
+export const MUSIC_VIDEO_STORAGE_KEY = 'typingmania:preferences:music-video'
 export const SONG_SORT_MODE_STORAGE_KEY = 'typingmania:preferences:song-sort-mode'
 export const SONG_SORT_DIRECTION_STORAGE_KEY = 'typingmania:preferences:song-sort-direction'
 
@@ -56,6 +57,10 @@ export default class GamePreferences {
     // Reduced motion changes the animation profile instead of silently
     // disabling feedback on a new computer.
     this.keyEffectsEnabled = savedKeyEffects ?? true
+    this.musicVideoEnabled = storedBoolean(
+      this.storage,
+      MUSIC_VIDEO_STORAGE_KEY,
+    ) ?? false
     this.songSortMode = storedChoice(
       this.storage,
       SONG_SORT_MODE_STORAGE_KEY,
@@ -85,6 +90,21 @@ export default class GamePreferences {
     return this.keyEffectsEnabled
   }
 
+  setMusicVideoEnabled (enabled) {
+    const next = Boolean(enabled)
+    if (next === this.musicVideoEnabled) return false
+    this.musicVideoEnabled = next
+    try {
+      this.storage?.setItem(MUSIC_VIDEO_STORAGE_KEY, String(next))
+    } catch {}
+    return true
+  }
+
+  toggleMusicVideo () {
+    this.setMusicVideoEnabled(!this.musicVideoEnabled)
+    return this.musicVideoEnabled
+  }
+
   setSongSort (mode, direction) {
     const nextMode = SONG_SORT_MODES.has(mode) ? mode : 'added'
     const nextDirection = SONG_SORT_DIRECTIONS.has(direction)
@@ -103,4 +123,5 @@ export default class GamePreferences {
     } catch {}
     return changed
   }
+
 }

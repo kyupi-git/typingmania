@@ -10,10 +10,12 @@ import {
   fetchFirstAvailable,
   fetchWithTimeout,
 } from './network.js'
+import { resolveGeneralMediaWork } from './media-catalog-api.js'
+import { inferNetworkRegion } from './network-source-planner.js'
 
 export { SONG_ORIGIN_VERSION }
 
-const SONG_ORIGIN_CACHE_VERSION = 4
+const SONG_ORIGIN_CACHE_VERSION = 5
 const CACHE_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000
 const NEGATIVE_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 const BANGUMI_SEARCH_URL =
@@ -25,7 +27,7 @@ const BANGUMI_WEBSITE_ORIGINS = [
   'https://chii.in',
 ]
 const USER_AGENT =
-  'TypingManiaNovel/20260719 (QQ Music metadata resolver)'
+  'TypingManiaNovel/20260726 (music metadata resolver)'
 
 function normalize (value) {
   return String(value || '')
@@ -202,6 +204,38 @@ function platformScore (medium, platform) {
   }
   if (medium === 'film') {
     return /(?:剧场|劇場|movie|film)/iu.test(value) ? 15 : -20
+  }
+  if (medium === 'television') {
+    return /(?:电视剧|電視劇|ドラマ|\btv\b|television)/iu.test(value)
+      ? 15
+      : -20
+  }
+  if (medium === 'movie') {
+    return /(?:电影|電影|映画|movie|film)/iu.test(value) ? 15 : -20
+  }
+  if (medium === 'documentary') {
+    return /(?:纪录|紀錄|記録|documentary)/iu.test(value) ? 15 : -15
+  }
+  if (medium === 'commercial') {
+    return /(?:广告|廣告|コマーシャル|\bCM\b|commercial|advert)/iu
+      .test(value) ? 15 : -15
+  }
+  if (medium === 'variety') {
+    return /(?:综艺|綜藝|バラエティ|variety)/iu.test(value) ? 15 : -15
+  }
+  if (medium === 'sports-event') {
+    return /(?:体育|體育|スポーツ|sport|tournament|competition)/iu
+      .test(value) ? 15 : -15
+  }
+  if (medium === 'visual-novel') {
+    return /(?:visual\s+novel|ビジュアルノベル|ギャルゲー|game)/iu
+      .test(value) ? 15 : -10
+  }
+  if (medium === 'jrpg') {
+    return /(?:jrpg|rpg|game|ゲーム)/iu.test(value) ? 15 : -10
+  }
+  if (medium === 'game') {
+    return /(?:game|ゲーム|游戏|遊戲)/iu.test(value) ? 15 : -10
   }
   return 0
 }
@@ -434,6 +468,7 @@ function buildOrigin (parts, originalTitle, details = {}) {
     catalog_id: details.catalogId ? String(details.catalogId) : '',
     evidence: details.evidence || '',
     confidence: Number(details.confidence || 0),
+    poster_url: details.posterUrl || undefined,
     title_scope: 'direct-production',
     verified_at: new Date().toISOString(),
   }
@@ -477,25 +512,36 @@ function applyCurrentStructure (origin, metadata) {
   }
 }
 
-function japaneseAlbumTitle (query, albums) {
+export function japaneseAlbumTitle (query, albums) {
   const expected = normalize(query)
   for (const album of albums.filter(Boolean)) {
     const value = String(album.title || album.album || '').trim()
-    if (!value || !normalize(value).includes(expected)) continue
+    if (!value) continue
     const withoutLocalized = value.replace(
       /[\(（]([^()（）]+)[\)）]/gu,
       (match, inner) => normalize(inner) === expected ? '' : match,
     )
-    const title = withoutLocalized
-      .split(
-        /\s*(?:オリジナル[・\s]*(?:サウンドトラック| soundtrack)|サウンドトラック|\bOST\b|original\s+(?:soundtrack|score))/iu,
-      )[0]
+    const explicit = withoutLocalized.match(
+      /(?:TV\s*アニメ|テレビアニメ|劇場版アニメ|アニメ映画)?\s*[『「｢]([^』」｣]{2,120})[』」｣]/u,
+    )?.[1]
+    const structural = withoutLocalized.split(
+      /\s*(?:キャラクターソング(?:アルバム|集)?|イメージソング(?:アルバム|集)?|オリジナル[・\s]*(?:サウンドトラック| soundtrack)|サウンドトラック|\bOST\b|original\s+(?:soundtrack|score))/iu,
+    )[0]
+    const title = String(explicit || structural)
       .trim()
+      .replace(/^(?:TV\s*アニメ|テレビアニメ|劇場版アニメ|アニメ映画)\s*/u, '')
+      .replace(/^[『「｢]|[』」｣]$/gu, '')
       .replace(/[\-–—:：・\s]+$/u, '')
     if (
       title &&
       normalize(title) !== expected &&
-      /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(title)
+      /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(title) &&
+      !/(?:キャラクターソング|サウンドトラック)/u.test(title) &&
+      (
+        explicit ||
+        normalize(value).includes(expected) ||
+        /(?:キャラクターソング|サウンドトラック|TV\s*アニメ)/iu.test(value)
+      )
     ) {
       return {
         title,
@@ -506,7 +552,18 @@ function japaneseAlbumTitle (query, albums) {
   return null
 }
 
-async function searchBangumiApi (query, fetchImpl, timeoutMs) {
+function bangumiSubjectType (medium) {
+  if (['television', 'movie'].includes(medium)) return 6
+  if (['visual-novel', 'jrpg', 'game'].includes(medium)) return 4
+  return 2
+}
+
+async function searchBangumiApi (
+  query,
+  fetchImpl,
+  timeoutMs,
+  medium = 'tv',
+) {
   const response = await fetchWithTimeout(
     fetchImpl,
     BANGUMI_SEARCH_URL,
@@ -520,7 +577,7 @@ async function searchBangumiApi (query, fetchImpl, timeoutMs) {
         keyword: query,
         sort: 'match',
         filter: {
-          type: [2],
+          type: [bangumiSubjectType(medium)],
           nsfw: false,
         },
       }),
@@ -572,7 +629,7 @@ function decodeHtmlText (value) {
     .trim()
 }
 
-function parseBangumiWebsiteResults (html) {
+function parseBangumiWebsiteResults (html, medium = 'tv') {
   const candidates = []
   for (const match of String(html || '').matchAll(
     /<li id="item_(\d+)"[\s\S]*?<\/li>/gu,
@@ -588,7 +645,7 @@ function parseBangumiWebsiteResults (html) {
     if (!name) continue
     candidates.push({
       id: Number(match[1]),
-      type: 2,
+      type: bangumiSubjectType(medium),
       name,
       name_cn: originalTitle ? localizedTitle : '',
       platform: /\bTV\b/iu.test(block) ? 'TV' : '',
@@ -600,9 +657,16 @@ function parseBangumiWebsiteResults (html) {
   return candidates
 }
 
-async function searchBangumiWebsite (query, fetchImpl, timeoutMs) {
+async function searchBangumiWebsite (
+  query,
+  fetchImpl,
+  timeoutMs,
+  medium = 'tv',
+) {
   const routes = BANGUMI_WEBSITE_ORIGINS.map(origin => (
-    `${origin}/subject_search/${encodeURIComponent(query)}?cat=2`
+    `${origin}/subject_search/${encodeURIComponent(query)}?cat=${
+      bangumiSubjectType(medium)
+    }`
   ))
   const { response } = await fetchFirstAvailable(
     fetchImpl,
@@ -618,7 +682,7 @@ async function searchBangumiWebsite (query, fetchImpl, timeoutMs) {
       perAttemptMs: 1200,
     },
   )
-  return parseBangumiWebsiteResults(await response.text())
+  return parseBangumiWebsiteResults(await response.text(), medium)
 }
 
 function broaderWorkQuery (value) {
@@ -696,18 +760,83 @@ export async function resolveSongOrigin ({
       albumMid: metadata.albumMid,
     },
   ])
+  const generalMedia = [
+    'tv',
+    'film',
+    'television',
+    'movie',
+    'documentary',
+    'commercial',
+    'variety',
+    'sports-event',
+    'visual-novel',
+    'jrpg',
+    'game',
+  ].includes(parts.media)
+  const region = inferNetworkRegion()
+  let generalTried = false
+  let generalError = null
+  const resolveGeneral = async () => {
+    if (!generalMedia || generalTried) return null
+    generalTried = true
+    try {
+      const match = await resolveGeneralMediaWork(parts, {
+        fetchImpl,
+        timeoutMs,
+        region,
+      })
+      return match
+        ? buildOrigin(parts, match.title, {
+            originalLanguage: match.language,
+            titleSource: 'catalog-primary',
+            catalog: match.catalog,
+            catalogId: match.catalogId,
+            evidence: match.evidence,
+            confidence: match.confidence,
+            posterUrl: match.posterUrl,
+          })
+        : null
+    } catch (error) {
+      generalError = error
+      return null
+    }
+  }
+  const bangumiPreferredMedia = new Set([
+    'tv',
+    'film',
+    'visual-novel',
+    'jrpg',
+    'game',
+  ])
+  if (
+    generalMedia &&
+    (
+      !bangumiPreferredMedia.has(parts.media) ||
+      ['hk', 'tw', 'kr', 'sea', 'us', 'eu', 'global'].includes(region)
+    )
+  ) {
+    const origin = await resolveGeneral()
+    if (origin) return origin
+  }
 
   let candidates = []
   let websiteUsed = false
+  let bangumiError = null
   try {
     candidates = await searchBangumiWebsite(
       parts.workTitle,
       fetchImpl,
       timeoutMs,
+      parts.media,
     )
     websiteUsed = candidates.length > 0
     if (!candidates.length) {
-      candidates = await searchBangumiApi(parts.workTitle, fetchImpl, timeoutMs)
+      candidates = await searchBangumiApi(
+        parts.workTitle,
+        fetchImpl,
+        timeoutMs,
+        parts.media,
+      )
     }
   } catch (error) {
     try {
@@ -715,19 +844,11 @@ export async function resolveSongOrigin ({
         parts.workTitle,
         fetchImpl,
         timeoutMs,
+        parts.media,
       )
     } catch {
-      if (qqOriginal) {
-        return buildOrigin(parts, qqOriginal.title, {
-          originalLanguage: 'ja',
-          titleSource: 'soundtrack-album',
-          catalog: 'qqmusic',
-          catalogId: qqOriginal.albumMid,
-          evidence: 'soundtrack-album',
-          confidence: 0.9,
-        })
-      }
-      throw error
+      bangumiError = error
+      candidates = []
     }
   }
 
@@ -743,8 +864,18 @@ export async function resolveSongOrigin ({
   if (!best && broaderQuery && normalize(broaderQuery) !== normalize(parts.workTitle)) {
     try {
       const broaderCandidates = websiteUsed
-        ? await searchBangumiWebsite(broaderQuery, fetchImpl, timeoutMs)
-        : await searchBangumiApi(broaderQuery, fetchImpl, timeoutMs)
+        ? await searchBangumiWebsite(
+            broaderQuery,
+            fetchImpl,
+            timeoutMs,
+            parts.media,
+          )
+        : await searchBangumiApi(
+            broaderQuery,
+            fetchImpl,
+            timeoutMs,
+            parts.media,
+          )
       const byId = new Map(
         [...candidates, ...broaderCandidates]
           .map(candidate => [String(candidate.id || candidate.name), candidate]),
@@ -766,6 +897,7 @@ export async function resolveSongOrigin ({
         parts.workTitle,
         fetchImpl,
         timeoutMs,
+        parts.media,
       )
       const byId = new Map(
         [...candidates, ...apiCandidates]
@@ -829,6 +961,9 @@ export async function resolveSongOrigin ({
     })
   }
 
+  const generalOrigin = await resolveGeneral()
+  if (generalOrigin) return generalOrigin
+
   if (qqOriginal) {
     return buildOrigin(parts, qqOriginal.title, {
       originalLanguage: 'ja',
@@ -838,6 +973,9 @@ export async function resolveSongOrigin ({
       evidence: 'soundtrack-album',
       confidence: 0.9,
     })
+  }
+  if (bangumiError || generalError) {
+    throw bangumiError || generalError
   }
   return null
 }
@@ -854,7 +992,10 @@ export default class SongOriginResolver {
     fetchImpl = globalThis.fetch,
     timeoutMs = 5000,
   }) {
-    this.filename = path.join(root, 'data', 'qqmusic-origin-cache.json')
+    this.filename = path.join(root, 'data', 'song-origin-cache.json')
+    this.legacyFilenames = [
+      path.join(root, 'data', 'qqmusic-origin-cache.json'),
+    ]
     this.fetchImpl = fetchImpl
     this.timeoutMs = timeoutMs
     this.cache = { version: SONG_ORIGIN_CACHE_VERSION, entries: {} }
@@ -867,11 +1008,14 @@ export default class SongOriginResolver {
   async load () {
     if (this.loaded) return
     this.loaded = true
-    try {
-      const stored = JSON.parse(await fs.readFile(this.filename, 'utf8'))
-      if (stored?.version === SONG_ORIGIN_CACHE_VERSION && stored.entries) {
+    for (const filename of [this.filename, ...this.legacyFilenames]) {
+      try {
+        const stored = JSON.parse(await fs.readFile(filename, 'utf8'))
+        if (stored?.version !== SONG_ORIGIN_CACHE_VERSION || !stored.entries) {
+          continue
+        }
         this.cache = stored
-        let changed = false
+        let changed = filename !== this.filename
         for (const entry of Object.values(this.cache.entries)) {
           const normalized = normalizeOriginalTitleLanguage(entry?.origin)
           if (normalized !== entry?.origin) {
@@ -879,9 +1023,15 @@ export default class SongOriginResolver {
             changed = true
           }
         }
-        if (changed) await this.save().catch(() => {})
-      }
-    } catch {}
+        if (changed) {
+          await this.save().catch(() => {})
+          if (filename !== this.filename) {
+            await fs.rm(filename, { force: true }).catch(() => {})
+          }
+        }
+        return
+      } catch {}
+    }
   }
 
   async save () {
@@ -935,10 +1085,10 @@ export default class SongOriginResolver {
       } catch {
         this.lastLookupFailed = true
         this.consecutiveNetworkFailures++
-        // One failed lookup has already exhausted the official API and all
-        // three official website domains. Skip this optional enrichment for
-        // the rest of the batch instead of repeating the full delay.
-        if (this.consecutiveNetworkFailures >= 1) this.networkDisabled = true
+        // A single route failure must not suppress the remainder of a mixed
+        // provider batch. Open the local circuit only after three consecutive
+        // songs exhaust all catalog routes.
+        if (this.consecutiveNetworkFailures >= 3) this.networkDisabled = true
         return null
       }
     }

@@ -168,13 +168,19 @@ export async function pruneUnusedLibraryCaches (root, records = null) {
     path.join(resolvedRoot, 'data', 'qqmusic-artist-cache.json'),
     key => singerMids.has(String(key)),
   )
-  const origins = await pruneCacheFile(
-    path.join(resolvedRoot, 'data', 'qqmusic-origin-cache.json'),
-    (_, entry) => (
-      entry?.origin?.catalog_id &&
-      catalogIds.has(String(entry.origin.catalog_id))
-    ),
-  )
+  let origins = 0
+  for (const cacheName of [
+    'song-origin-cache.json',
+    'qqmusic-origin-cache.json',
+  ]) {
+    origins += await pruneCacheFile(
+      path.join(resolvedRoot, 'data', cacheName),
+      (_, entry) => (
+        entry?.origin?.catalog_id &&
+        catalogIds.has(String(entry.origin.catalog_id))
+      ),
+    )
+  }
   return { artists, origins }
 }
 

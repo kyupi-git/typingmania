@@ -1,7 +1,7 @@
-import {
-  isAnimeThemeSong,
-} from './cover-selection.js'
 import { hasVerifiedOriginalWorkTitle } from '../../src/song/song-origin.js'
+import {
+  inferSongOriginHint,
+} from './imported-song-enrichment.js'
 import {
   scanSongLibrary,
 } from './library.js'
@@ -13,6 +13,12 @@ import SongOriginResolver, {
 } from './song-origin-resolver.js'
 
 const UNRESOLVED_RETRY_MS = 7 * 24 * 60 * 60 * 1000
+const ORIGIN_SUPPORTED_SERVICES = new Set([
+  'qqmusic',
+  'netease',
+  'apple-music',
+  'local-files',
+])
 
 export function hasCurrentSongOriginResolution (song) {
   if (hasVerifiedOriginalWorkTitle(song?.origin)) {
@@ -36,8 +42,7 @@ export function hasCurrentSongOriginResolution (song) {
 
 export function needsSongOriginRefresh (song) {
   return (
-    song?.source?.service === 'qqmusic' &&
-    isAnimeThemeSong(song) &&
+    ORIGIN_SUPPORTED_SERVICES.has(song?.source?.service) &&
     !hasCurrentSongOriginResolution(song)
   )
 }
@@ -68,11 +73,14 @@ export async function refreshMissingSongOrigins ({
     try {
       const metadata = {
         ...song,
+        album: song.source?.cover?.album || '',
+        albumMid: song.source?.cover?.album_mid || '',
         artistNames: String(song.artist || '')
           .split(/\s*(?:\/|&|、|,)\s*/u)
           .filter(Boolean),
       }
-      const origin = await resolver.resolve(metadata, song.source?.cover)
+      const enriched = await inferSongOriginHint(metadata)
+      const origin = await resolver.resolve(enriched, song.source?.cover)
       if (!origin) {
         if (resolver.lastLookupFailed) {
           result.failed++

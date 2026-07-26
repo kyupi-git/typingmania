@@ -1,10 +1,6 @@
 import Screen from '../graphics/screen.js'
 import { Group, Txt } from '../graphics/elements.js'
 import {
-  BadgeAudio,
-  BadgeVideo,
-  BadgeYouTube,
-  Black,
   format_number_comma,
   format_number_fixed,
   format_time,
@@ -39,8 +35,12 @@ export default class SongInfoScreen extends Screen {
           .color(White)
           .clampLines(2),
 
-        // Language Badge
-        this.song_language = Txt(30, 80, 30, 30).font(UIFont.size(18)).align(CENTER).color(White).fill(Black).radius(5),
+        // A neutral marker avoids presenting unreliable language guesses.
+        this.song_marker = Txt(30, 74, 30, 40)
+          .text('•')
+          .font(UIFont.size(24))
+          .align(CENTER)
+          .color(White),
       ]).layer(1),
       this.sub_info_group = Group(0, 0, 1920, 1080, [
         this.song_sub_group = Group(0, 0, 1920, 1080, [
@@ -91,13 +91,13 @@ export default class SongInfoScreen extends Screen {
       this.song_title.text(this.i18n.t('common.empty'))
       this.song_subtitle.text('')
       this.collection_description.text('')
-      this.song_language.hide()
+      this.song_marker.hide()
       this.song_sub_group.hide()
       this.collection_sub_group.hide()
       this.song_path.hide()
     } else if (song instanceof SongCollection) {
       this.updateSongPath(song.parent)
-      this.song_language.hide()
+      this.song_marker.hide()
       this.song_artist.text('')
       this.song_title.text(displayCollectionName(song, this.i18n.locale))
       this.song_subtitle.text(this.i18n.t('common.collection'))
@@ -109,7 +109,7 @@ export default class SongInfoScreen extends Screen {
       this.song_path.hide()
     } else {
       this.updateSongPath(song.collection)
-      this.song_language.text(song.language.toUpperCase()).fill(song.media_type === 'youtube' ? BadgeYouTube : song.media_type === 'video' ? BadgeVideo : BadgeAudio).show()
+      this.song_marker.show()
       this.song_artist.text(song.artist)
       const title = displaySongTitle(song, this.i18n.locale)
       const subtitle = displaySongSubtitle(song, this.i18n.locale)

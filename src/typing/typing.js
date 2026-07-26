@@ -18,14 +18,33 @@ export default class Typing {
       }
       const [start, end, ...lyrics] = line.split(',')
       const lyric = lyrics.join(',')
-
-      if (start !== current_time) {
-        // Add buffer line
-        this.lines.push(new TypingLine('', current_time / 1000, start / 1000, romanizer))
+      const start_time = Number(start)
+      const end_time = Number(end)
+      if (
+        !Number.isFinite(start_time) ||
+        !Number.isFinite(end_time) ||
+        end_time < start_time
+      ) {
+        continue
       }
-      this.lines.push(new TypingLine(lyric, start / 1000, end / 1000, romanizer))
 
-      current_time = end
+      if (start_time > current_time) {
+        // Add buffer line
+        this.lines.push(new TypingLine(
+          '',
+          current_time / 1000,
+          start_time / 1000,
+          romanizer,
+        ))
+      }
+      this.lines.push(new TypingLine(
+        lyric,
+        start_time / 1000,
+        end_time / 1000,
+        romanizer,
+      ))
+
+      current_time = Math.max(current_time, end_time)
     }
   }
 
@@ -85,5 +104,32 @@ export default class Typing {
 
     // 0 = nothing, 1 = line changed, 2 = line changed, skipped
     return [changed, leftover]
+  }
+
+  /**
+   * Advance through every line that has expired at the supplied media time.
+   *
+   * Browsers can occasionally delay an animation frame (window movement,
+   * decoder work, power saving, or a busy device). Advancing only one line per
+   * frame makes the renderer fall progressively behind the audio after such a
+   * delay. Returning every transition lets the controller catch up in one
+   * bounded pass; the loop is safe because current_line always increases.
+   */
+  advanceTo (current_time) {
+    const transitions = []
+    while (true) {
+      const line = this.getCurrentLine()
+      if (!line || current_time <= line.end_time) break
+      const lineId = this.current_line
+      this.current_line++
+      transitions.push({
+        lineId,
+        endTime: line.end_time,
+        leftover: line.isCompleted()
+          ? 0
+          : line.getLeftoverCharCount(),
+      })
+    }
+    return transitions
   }
 }

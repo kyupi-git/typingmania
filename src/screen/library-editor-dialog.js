@@ -25,6 +25,7 @@ function dispatchKey (key, code = '') {
 export default class LibraryEditorDialog {
   constructor (i18n) {
     this.i18n = i18n
+    this.mode = 'editor'
     this.songs = []
     this.selectedIds = new Set()
     this.cursor = 0
@@ -182,15 +183,18 @@ export default class LibraryEditorDialog {
 
   setLocale () {
     const t = this.i18n.t.bind(this.i18n)
-    this.title.text(t('library.editor.title'))
-    this.empty.text(t('library.editor.empty'))
-    this.hint.text(t('library.editor.hint'))
+    const prefix = this.mode === 'duplicates'
+      ? 'library.dedupe'
+      : 'library.editor'
+    this.title.text(t(`${prefix}.title`))
+    this.empty.text(t(`${prefix}.empty`))
+    this.hint.text(t(`${prefix}.hint`))
     this.closeLabel.text(t('library.editor.close'))
     this.confirmTitle.text(t('library.editor.confirmTitle'))
     this.confirmHint.text(t('library.editor.confirmHint'))
     this.confirmButtonLabel.text(t('library.editor.confirmAction'))
     this.confirmCancelLabel.text(t('library.editor.cancelAction'))
-    this.group.el.setAttribute('aria-label', t('library.editor.title'))
+    this.group.el.setAttribute('aria-label', t(`${prefix}.title`))
     this.closeButton.el.setAttribute('aria-label', t('library.editor.close'))
     this.confirmButton.el.setAttribute(
       'aria-label',
@@ -199,12 +203,14 @@ export default class LibraryEditorDialog {
     this.render()
   }
 
-  show (songs) {
+  show (songs, { mode = 'editor' } = {}) {
+    this.mode = mode === 'duplicates' ? 'duplicates' : 'editor'
     this.songs = Array.isArray(songs) ? songs : []
     this.selectedIds.clear()
     this.cursor = 0
     this.offset = 0
     this.hideConfirmation()
+    this.setLocale()
     this.render()
     this.group.show()
   }
@@ -241,7 +247,10 @@ export default class LibraryEditorDialog {
 
   render () {
     const t = this.i18n.t.bind(this.i18n)
-    this.summary.text(t('library.editor.summary', {
+    const prefix = this.mode === 'duplicates'
+      ? 'library.dedupe'
+      : 'library.editor'
+    this.summary.text(t(`${prefix}.summary`, {
       selected: this.selectedIds.size,
       total: this.songs.length,
     }))
@@ -272,6 +281,9 @@ export default class LibraryEditorDialog {
       this.rowArtists[position].text([
         song.artist,
         String(song.language || '').toLocaleUpperCase(),
+        song.duplicateOf
+          ? t('library.dedupe.matches', { title: song.duplicateOf })
+          : '',
       ].filter(Boolean).join(' · '))
       this.rowBackgrounds[position].el.style.backgroundColor = selected
         ? 'rgba(156, 58, 72, 0.82)'

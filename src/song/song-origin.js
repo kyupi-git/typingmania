@@ -74,15 +74,29 @@ export const SONG_ORIGIN_VERSION = 3
 const MEDIA_PATTERNS = [
   ['tv', /\bTV\s*(?:动画|動畫|アニメ|anime)/iu],
   ['film', /(?:剧场版|劇場版|anime\s+film|animated\s+film)/iu],
+  // Some provider catalogs omit the TV prefix for character and image
+  // songs. Film-specific wording is checked first, so a remaining generic
+  // animation label safely describes the television/series production.
+  ['tv', /(?:动画|動畫|アニメ|\banime\b)/iu],
+  ['documentary', /(?:纪录片|紀錄片|記録映画|ドキュメンタリー|documentary)/iu],
+  ['commercial', /(?:广告片|廣告片|广告|廣告|コマーシャル|テレビCM|\bCM\b|\bcommercial\b|\badvert(?:isement|ising)?\b)/iu],
+  ['variety', /(?:综艺节目|綜藝節目|综艺|綜藝|バラエティ番組|\bvariety\s+show\b)/iu],
+  ['sports-event', /(?:体育赛事|體育賽事|体育比赛|體育比賽|スポーツ(?:大会|イベント|中継)|\bsports?\s+(?:event|broadcast|tournament|competition)\b)/iu],
+  ['television', /(?:电视剧|電視劇|电视连续剧|電視連續劇|テレビドラマ|\bTV\s*(?:drama|series|show)\b|television\s+(?:drama|series))/iu],
+  ['movie', /(?:电影|電影|実写映画|映画|\bmovie\b|motion\s+picture|\bfilm\b)/iu],
+  ['visual-novel', /(?:视觉小说|視覺小說|美少女游戏|美少女遊戲|ギャルゲー|ビジュアルノベル|visual\s+novel|galgame)/iu],
+  ['jrpg', /(?:日式角色扮演游戏|日式角色扮演遊戲|JRPG|RPG)/iu],
+  ['game', /(?:电子游戏|電子遊戲|游戏|遊戲|ゲーム|video\s+game|\bgame\b)/iu],
 ]
 
 const ROLE_PATTERNS = [
-  ['character', /(?:角色歌(?:曲)?|キャラクターソング|character\s+song)/iu],
+  ['soundtrack', /(?:原声带(?:收录)?歌曲|原聲帶(?:收錄)?歌曲|サウンドトラック収録曲|soundtrack\s+(?:song|track))/iu],
+  ['character', /(?:角色(?:歌(?:曲)?|曲)|キャラクターソング|character\s+song)/iu],
   ['image', /(?:印象曲|イメージソング|image\s+song)/iu],
   ['insert', /(?:插入曲|插曲|挿入歌|insert\s+song)/iu],
   ['opening', /(?:片头(?:主题)?曲|片頭(?:主題)?曲|オープニング(?:テーマ|主題歌)?|opening(?:\s+(?:theme|song))?|\bOP\b)/iu],
   ['ending', /(?:片尾(?:主题)?曲|エンディング(?:テーマ|主題歌)?|ending(?:\s+(?:theme|song))?|\bED\b)/iu],
-  ['theme', /(?:主题曲|主題歌|theme\s+song)/iu],
+  ['theme', /(?:主题曲|主題歌|テーマソング|theme\s+song)/iu],
 ]
 
 function firstMatch (text, patterns) {
@@ -152,6 +166,7 @@ const ROLE_TEXT = {
     insert: '插曲',
     character: '角色歌',
     image: '印象曲',
+    soundtrack: '原声带歌曲',
   },
   en: {
     opening: 'opening theme',
@@ -160,6 +175,7 @@ const ROLE_TEXT = {
     insert: 'insert song',
     character: 'character song',
     image: 'image song',
+    soundtrack: 'soundtrack song',
   },
   ja: {
     opening: 'オープニングテーマ',
@@ -168,6 +184,7 @@ const ROLE_TEXT = {
     insert: '挿入歌',
     character: 'キャラクターソング',
     image: 'イメージソング',
+    soundtrack: 'サウンドトラック収録曲',
   },
 }
 
@@ -177,7 +194,25 @@ function localizeChinese (parts) {
     ? `TV动画${work}`
     : parts.media === 'film'
       ? `剧场版动画${work}`
-      : work
+      : parts.media === 'television'
+        ? `电视剧${work}`
+        : parts.media === 'movie'
+          ? `电影${work}`
+          : parts.media === 'documentary'
+            ? `纪录片${work}`
+            : parts.media === 'commercial'
+              ? `广告片${work}`
+              : parts.media === 'variety'
+                ? `综艺节目${work}`
+                : parts.media === 'sports-event'
+                  ? `体育赛事${work}`
+          : parts.media === 'visual-novel'
+            ? `视觉小说${work}`
+            : parts.media === 'jrpg'
+              ? `日式角色扮演游戏${work}`
+              : parts.media === 'game'
+                ? `游戏${work}`
+          : work
   const qualifiers = [
     parts.season ? `第${parts.season}季` : '',
     parts.episodes.length ? `第${parts.episodes.join('、')}话` : '',
@@ -194,7 +229,25 @@ function localizeEnglish (parts) {
     ? `the TV anime ${work}`
     : parts.media === 'film'
       ? `the anime film ${work}`
-      : work
+      : parts.media === 'television'
+        ? `the TV series ${work}`
+        : parts.media === 'movie'
+          ? `the film ${work}`
+          : parts.media === 'documentary'
+            ? `the documentary ${work}`
+            : parts.media === 'commercial'
+              ? `the commercial ${work}`
+              : parts.media === 'variety'
+                ? `the variety show ${work}`
+                : parts.media === 'sports-event'
+                  ? `the sports event ${work}`
+          : parts.media === 'visual-novel'
+            ? `the visual novel ${work}`
+            : parts.media === 'jrpg'
+              ? `the JRPG ${work}`
+              : parts.media === 'game'
+                ? `the game ${work}`
+          : work
   if (parts.season) subject = `season ${parts.season} of ${subject}`
   if (parts.episodes.length) {
     subject = `${
@@ -212,7 +265,25 @@ function localizeJapanese (parts) {
     ? `TVアニメ『${parts.workTitle}』`
     : parts.media === 'film'
       ? `劇場版アニメ『${parts.workTitle}』`
-      : `『${parts.workTitle}』`
+      : parts.media === 'television'
+        ? `テレビドラマ『${parts.workTitle}』`
+        : parts.media === 'movie'
+          ? `映画『${parts.workTitle}』`
+          : parts.media === 'documentary'
+            ? `ドキュメンタリー『${parts.workTitle}』`
+            : parts.media === 'commercial'
+              ? `CM『${parts.workTitle}』`
+              : parts.media === 'variety'
+                ? `バラエティ番組『${parts.workTitle}』`
+                : parts.media === 'sports-event'
+                  ? `スポーツイベント『${parts.workTitle}』`
+          : parts.media === 'visual-novel'
+            ? `ビジュアルノベル『${parts.workTitle}』`
+            : parts.media === 'jrpg'
+              ? `JRPG『${parts.workTitle}』`
+              : parts.media === 'game'
+                ? `ゲーム『${parts.workTitle}』`
+          : `『${parts.workTitle}』`
   const qualifiers = [
     parts.season ? `第${parts.season}期` : '',
     parts.episodes.length ? `第${parts.episodes.join('・')}話` : '',
@@ -269,7 +340,7 @@ export function formatSongOrigin (
 }
 
 /**
- * Localizes the structural part of an anime-song origin without a network
+ * Localizes the structural part of a screen-song origin without a network
  * service. The work title inside brackets is intentionally preserved.
  */
 export function localizeSongOrigin (text, locale) {

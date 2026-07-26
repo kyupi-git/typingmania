@@ -8,10 +8,12 @@ import {
 } from '../../src/util/song-meta.js'
 import {
   filterLyricLines,
+  isNonVocalTrackMetadata,
   LYRIC_QUALITY_VERSION,
   normalizeLyricComparable,
 } from './lyrics-quality.js'
 import { scanSongLibrary } from './library.js'
+import { normalizeLyricTimingWindows } from './timed-lyrics.js'
 
 function exactArrayBuffer (buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
@@ -48,7 +50,9 @@ export function parseLyricsCsv (csv) {
 
 function needsMaintenance (song) {
   return (
-    song?.source?.service === 'qqmusic' &&
+    ['qqmusic', 'netease', 'apple-music', 'local-files'].includes(
+      song?.source?.service,
+    ) &&
     (
       Number(song.source?.quality?.version || 0) < LYRIC_QUALITY_VERSION ||
       Number(song.source?.pace?.version || 0) < PACE_METADATA_VERSION
@@ -67,6 +71,9 @@ async function refreshPackedSongLyrics (existingSong) {
   try {
     packed.unpackFromBuffer(exactArrayBuffer(input))
     const song = JSON.parse(packed.getAsText('song.json'))
+    if (isNonVocalTrackMetadata(song)) {
+      throw new Error('instrumental or background-music track')
+    }
     const parsed = parseLyricsCsv(packed.getAsText('lyrics.csv'))
     const filtered = filterLyricLines(parsed, song)
     if (filtered.kept.length < 5) {
@@ -77,6 +84,7 @@ async function refreshPackedSongLyrics (existingSong) {
       line.end,
       line.lyric,
     ])
+    const timing = normalizeLyricTimingWindows(lyrics)
     const [lyricsCsv, cpm, maxCpm] = buildSongLyrics(lyrics, {
       durationMs: Math.max(0, Number(song.duration) || 0) * 1000,
     })
@@ -91,6 +99,9 @@ async function refreshPackedSongLyrics (existingSong) {
       removed_metadata_lines:
         Number(song.source.quality?.removed_metadata_lines || 0) +
         filtered.removed.length,
+      timing_windows_adjusted: timing.adjusted,
+      instrumental_gap_ms_removed: timing.removedGapMs,
+      typical_ms_per_key: timing.typicalMsPerKey,
     }
     song.source.pace = {
       version: PACE_METADATA_VERSION,
@@ -142,7 +153,7 @@ async function refreshPackedSongLyrics (existingSong) {
   }
 }
 
-export async function refreshQQMusicLyricsAndPace ({
+export async function refreshImportedLyricsAndPace ({
   root,
   records = null,
   onProgress = () => {},

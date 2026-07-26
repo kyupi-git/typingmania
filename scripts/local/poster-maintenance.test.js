@@ -44,15 +44,28 @@ test('poster refresh requires current identity proof and periodic freshness', ()
   }), { now })).toBe(true)
 })
 
-test('non-Bangumi and non-QQ Music songs never trigger poster maintenance', () => {
+test('poster maintenance supports every imported source but not starter songs', () => {
   expect(needsPosterRefresh({
     ...song({}),
     source: { service: 'typingmania-demo' },
   })).toBe(false)
   expect(needsPosterRefresh({
     ...song({}),
+    source: { service: 'netease', cover: {} },
+  })).toBe(true)
+  expect(needsPosterRefresh({
+    ...song({}),
     origin: { catalog: 'qqmusic', catalog_id: 'album' },
   })).toBe(false)
+  expect(needsPosterRefresh({
+    ...song({}),
+    origin: {
+      catalog: 'tvmaze',
+      catalog_id: '42',
+      poster_url: 'https://static.tvmaze.com/uploads/images/example.jpg',
+    },
+    source: { service: 'local-files', cover: {} },
+  })).toBe(true)
 })
 
 test('poster identity is refreshed when the direct production title changes', () => {

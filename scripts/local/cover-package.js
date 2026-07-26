@@ -1,7 +1,7 @@
 import fs from 'fs/promises'
 
 import PackedFile from '../../src/lib/packedfile.js'
-import { POSTER_SELECTION_VERSION } from './anime-poster.js'
+import { POSTER_SELECTION_VERSION } from './media-poster.js'
 
 export const COVER_SELECTION_VERSION = 3
 
