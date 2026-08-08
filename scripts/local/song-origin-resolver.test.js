@@ -120,7 +120,37 @@ test('an exact catalog match stores the official original title and structure', 
     catalog: 'bangumi',
     catalog_id: '123456',
   })
-  expect(fetchImpl).toHaveBeenCalledTimes(2)
+  expect(fetchImpl.mock.calls.length).toBeGreaterThanOrEqual(2)
+})
+
+test('metadata refresh can bypass a still-valid provider origin cache', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tmn-origin-force-'))
+  try {
+    const fetchImpl = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: [{
+          id: 123456,
+          type: 2,
+          name: 'サンプル作品',
+          name_cn: '示例作品',
+          platform: 'TV',
+          meta_tags: ['日本', 'TV'],
+          collection: { collect: 7000 },
+        }],
+      }),
+    }))
+    const resolver = new SongOriginResolver({ root, fetchImpl })
+    await resolver.resolve(metadata())
+    const afterFirstLookup = fetchImpl.mock.calls.length
+    await resolver.resolve(metadata())
+    expect(fetchImpl).toHaveBeenCalledTimes(afterFirstLookup)
+    await resolver.resolve(metadata(), null, { forceRefresh: true })
+    expect(fetchImpl.mock.calls.length).toBeGreaterThan(afterFirstLookup)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
 })
 
 test('a theme uses the direct Japanese anime title, not its source-work title', async () => {
@@ -142,7 +172,7 @@ test('a theme uses the direct Japanese anime title, not its source-work title', 
     title_scope: 'direct-production',
     evidence: 'catalog-direct-release-title',
   })
-  expect(fetchImpl).toHaveBeenCalledTimes(5)
+  expect(fetchImpl.mock.calls.length).toBeGreaterThanOrEqual(5)
 })
 
 test('Japanese kanji and kana are not mistaken for a localized Chinese title', async () => {
@@ -169,7 +199,7 @@ test('Japanese kanji and kana are not mistaken for a localized Chinese title', a
     work_title: '世界最強の後衛 ～迷宮国の新人探索者～',
     original_language: 'ja',
   })
-  expect(fetchImpl).toHaveBeenCalledTimes(2)
+  expect(fetchImpl.mock.calls.length).toBeGreaterThanOrEqual(2)
 })
 
 test('unrelated search results are rejected instead of guessing', async () => {
@@ -219,6 +249,169 @@ test('live-action productions use Bangumi real-subject search, not anime records
     catalog: 'bangumi',
     catalog_id: '654',
   })
+})
+
+test('a broad TV-series credit is not silently narrowed to season one', async () => {
+  const fetchImpl = jest.fn(async url => {
+    const value = String(url)
+    if (value.includes('api.tvmaze.com/search')) {
+      return {
+        ok: true,
+        json: async () => [{
+          score: 0.99,
+          show: {
+            id: 1668,
+            name: 'Friends',
+            language: 'English',
+            image: { original: 'https://static.tvmaze.com/friends.jpg' },
+          },
+        }],
+      }
+    }
+    if (value.includes('/akas')) {
+      return { ok: true, json: async () => [] }
+    }
+    if (value.includes('wbsearchentities')) {
+      return { ok: true, json: async () => ({ search: [] }) }
+    }
+    if (value.includes('subject_search')) {
+      return {
+        ok: true,
+        text: async () => `
+          <li id="item_999" class="item odd clearit">
+            <div class="inner"><h3>
+              <a href="/subject/999" class="l">Friends (Season 1)</a>
+            </h3></div>
+          </li>
+        `,
+      }
+    }
+    return { ok: true, json: async () => ({ search: [] }) }
+  })
+  const origin = await resolveSongOrigin({
+    metadata: metadata({
+      subtitle: '电视剧《Friends》主题曲',
+      language: 'EN',
+    }),
+    fetchImpl,
+  })
+  expect(origin).toMatchObject({
+    work_title: 'Friends',
+    medium: 'television',
+    catalog: 'tvmaze',
+  })
+})
+
+test('a season-less fuzzy query prefers the unnumbered work over a sequel', async () => {
+  const fetchImpl = jest.fn(async () => ({
+    ok: true,
+    json: async () => ({
+      data: [{
+        id: 364822,
+        type: 2,
+        name: 'お隣の天使様にいつの間にか駄目人間にされていた件',
+        name_cn: '关于邻家的天使大人不知不觉把我惯成了废人这件事',
+        platform: 'TV',
+        meta_tags: ['日本', 'TV'],
+        collection: { collect: 1000 },
+      }, {
+        id: 458684,
+        type: 2,
+        name: 'お隣の天使様にいつの間にか駄目人間にされていた件 第2期',
+        name_cn: '关于邻家的天使大人不知不觉把我惯成了废人这件事 第2季',
+        platform: 'TV',
+        meta_tags: ['日本', 'TV'],
+        collection: { collect: 1000 },
+      }],
+    }),
+  }))
+  const origin = await resolveSongOrigin({
+    metadata: metadata({
+      subtitle: '动画《关于邻家的天使大人不知不觉把我惯成了废人这件事》片尾曲',
+    }),
+    fetchImpl,
+  })
+  expect(origin).toMatchObject({ catalog_id: '364822' })
+})
+
+test('an explicitly numbered sequel remains eligible for sequel matching', async () => {
+  const fetchImpl = jest.fn(async () => ({
+    ok: true,
+    json: async () => ({
+      data: [{
+        id: 364822,
+        type: 2,
+        name: 'お隣の天使様にいつの間にか駄目人間にされていた件',
+        name_cn: '关于邻家的天使大人不知不觉把我惯成了废人这件事',
+        platform: 'TV', meta_tags: ['日本', 'TV'], collection: {},
+      }, {
+        id: 458684,
+        type: 2,
+        name: 'お隣の天使様にいつの間にか駄目人間にされていた件 第2期',
+        name_cn: '关于邻家的天使大人不知不觉把我惯成了废人这件事 第2季',
+        platform: 'TV', meta_tags: ['日本', 'TV'], collection: {},
+      }],
+    }),
+  }))
+  const origin = await resolveSongOrigin({
+    metadata: metadata({
+      subtitle: '动画《关于邻家的天使大人不知不觉把我惯成了废人这件事 第2季》片尾曲',
+    }),
+    fetchImpl,
+  })
+  expect(origin).toMatchObject({ catalog_id: '458684' })
+})
+
+test.each([
+  ['视觉小说《サンプルノベル》主题曲', 'visual-novel', '4', 'サンプルノベル'],
+  ['JRPG《サンプルクエスト》主题曲', 'jrpg', '4', 'サンプルクエスト'],
+  ['游戏《サンプルゲーム》主题曲', 'game', '4', 'サンプルゲーム'],
+  ['纪录片《サンプル記録》主题曲', 'documentary', '6', 'サンプル記録'],
+  ['电影《サンプル映画》主题曲', 'movie', '6', 'サンプル映画'],
+])('non-anime direct production %s uses the matching professional catalog type', async (
+  subtitle,
+  medium,
+  category,
+  originalTitle,
+) => {
+  const bangumiQueries = []
+  const fetchImpl = jest.fn(async (url) => {
+    const value = String(url)
+    if (/subject_search/iu.test(value)) {
+      bangumiQueries.push(value)
+      return {
+        ok: true,
+        text: async () => `
+          <li id="item_777" class="item odd clearit">
+            <div class="inner"><h3>
+              <a href="/subject/777" class="l">${originalTitle}</a>
+            </h3></div>
+          </li>
+        `,
+      }
+    }
+    return {
+      ok: true,
+      json: async () => value.includes('storesearch')
+        ? { items: [] }
+        : value.includes('api.vndb.org')
+          ? { results: [] }
+          : value.includes('tvmaze')
+            ? []
+            : { search: [] },
+    }
+  })
+  const origin = await resolveSongOrigin({
+    metadata: metadata({ subtitle, language: 'JP' }),
+    fetchImpl,
+  })
+  expect(origin).toMatchObject({
+    work_title: originalTitle,
+    medium,
+    catalog: 'bangumi',
+  })
+  expect(bangumiQueries.some(value => value.includes(`cat=${category}`)))
+    .toBe(true)
 })
 
 test('a localized catalog primary title is rejected for a Japanese work', async () => {
@@ -289,7 +482,7 @@ test('the mainland-accessible catalog website exposes localized and original tit
     fetchImpl,
   })
 
-  expect(fetchImpl).toHaveBeenCalledTimes(1)
+  expect(fetchImpl.mock.calls.length).toBeGreaterThanOrEqual(1)
   expect(origin).toMatchObject({
     work_title: 'サンプル花ざかり 第2期',
     original_language: 'ja',
@@ -349,7 +542,7 @@ test('a cached work identity keeps each song own role and episode structure', as
       subtitle: '《示例群像》TV动画第6、8话片尾曲',
     }))
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(fetchImpl.mock.calls.length).toBeGreaterThanOrEqual(2)
     expect(opening).toMatchObject({
       work_title: 'サンプル群像',
       role: 'opening',

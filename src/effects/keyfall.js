@@ -49,6 +49,16 @@ const KEY_STATES = {
     opacity: 0.96,
     mark: '✓',
   },
+  assisted: {
+    face: 'linear-gradient(145deg, rgba(190,232,255,0.97) 0%, rgba(49,151,239,0.92) 48%, rgba(18,59,124,0.98) 100%)',
+    border: 'rgba(218,243,255,0.96)',
+    edge: 'rgba(13,46,97,0.96)',
+    glow: 'rgba(71,174,255,0.62)',
+    pulse: 'rgba(101,195,255,0.88)',
+    text: '#f5fbff',
+    opacity: 0.96,
+    mark: '◆',
+  },
   wrong: {
     face: 'linear-gradient(145deg, rgba(255,211,185,0.97) 0%, rgba(240,76,68,0.92) 48%, rgba(105,20,37,0.98) 100%)',
     border: 'rgba(255,229,212,0.92)',
@@ -323,6 +333,7 @@ export default class KeyfallEffect {
     lineId,
     remainingText = '',
     currentTime = this.currentTime,
+    kind = 'player',
   } = {}) {
     if (!this.enabled) return null
     const plan = this.planById.get(String(lineId))
@@ -339,11 +350,26 @@ export default class KeyfallEffect {
 
     if (correct) {
       note.consumed = true
-      note.streak = ++this.streak
-      this.updateStreakAura(this.streak)
+      if (kind === 'player') {
+        note.streak = ++this.streak
+        this.updateStreakAura(this.streak)
+      } else if (kind === 'missed') {
+        this.streak = 0
+        note.streak = 0
+        this.updateStreakAura(0)
+      } else {
+        note.streak = this.streak
+      }
       note.actualLabel = String(key)
       this.updateLabel(note, note.actualLabel)
-      this.setState(note, 'correct')
+      this.setState(
+        note,
+        kind === 'assisted'
+          ? 'assisted'
+          : kind === 'missed'
+            ? 'missed'
+            : 'correct',
+      )
       this.reconcilePlan(plan, remainingText, now)
     } else {
       this.streak = 0
@@ -351,7 +377,9 @@ export default class KeyfallEffect {
       note.wrongLabel = keycapLabel(key)
       this.setState(note, 'wrong')
     }
-    this.pulseInput(correct, note.streak)
+    if (kind === 'player' || !correct) {
+      this.pulseInput(correct, note.streak)
+    }
     this.updateNote(note, now)
     return note
   }

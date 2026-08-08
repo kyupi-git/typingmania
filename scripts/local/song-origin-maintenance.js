@@ -5,7 +5,10 @@ import {
 import {
   scanSongLibrary,
 } from './library.js'
-import { refreshPackedSongOrigin } from './song-origin-package.js'
+import {
+  refreshPackedSongOrigin,
+  SONG_ORIGIN_LOOKUP_VERSION,
+} from './song-origin-package.js'
 import SongOriginResolver, {
   needsDirectProductionTitleRefresh,
   normalizeOriginalTitleLanguage,
@@ -34,6 +37,7 @@ export function hasCurrentSongOriginResolution (song) {
   const age = Date.now() - Date.parse(resolution?.checked_at || 0)
   return Boolean(
     Number(resolution?.version || 0) >= SONG_ORIGIN_VERSION &&
+    Number(resolution?.lookup_version || 0) >= SONG_ORIGIN_LOOKUP_VERSION &&
     resolution?.resolved === false &&
     age >= 0 &&
     age < UNRESOLVED_RETRY_MS

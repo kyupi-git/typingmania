@@ -8,6 +8,7 @@ import {
 } from '../src/util/ass.js'
 import {
   buildSongLyrics,
+  estimateAssistReferencePace,
   songMetaFromAss,
 } from '../src/util/song-meta.js'
 
@@ -62,6 +63,14 @@ if ('youtube' in assInfo) {
 } else {
   throw new Error('No media specified. Require youtube, video, or audio')
 }
+
+const assistPace = estimateAssistReferencePace(
+  lyricsCsv,
+  songMetadata.language,
+  { durationMs: Number(songMetadata.duration) * 1000 },
+)
+songMetadata.assist_cpm = assistPace.averageCpm
+songMetadata.assist_max_cpm = assistPace.peakCpm
 
 // Initialize packer
 const packer = new PackedFile()

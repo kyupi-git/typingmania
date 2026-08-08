@@ -5,6 +5,25 @@ import {
   originalSongTitle,
 } from './song-title.js'
 
+test('cleanup version is bumped for same-Han Japanese aliases', () => {
+  expect(analyzeSongTitle('Sample').version).toBe(3)
+})
+
+test('a simplified Han translation is removed from a Japanese title', () => {
+  expect(analyzeSongTitle('偽物人間40号 (冒牌人类40号)', { language: 'JP' }))
+    .toMatchObject({
+      title: '偽物人間40号',
+      removedAliases: [{ text: '冒牌人类40号', reason: 'same-script-simplified-alias' }],
+    })
+})
+
+test('Japanese same-script subtitles and qualifiers remain intact', () => {
+  expect(originalSongTitle('青空 (青春篇)', 'JP'))
+    .toBe('青空 (青春篇)')
+  expect(originalSongTitle('偽物人間40号 (Live)', 'JP'))
+    .toBe('偽物人間40号 (Live)')
+})
+
 test('a cross-language QQ Music alias is removed from a Japanese original title', () => {
   const result = analyzeSongTitle(
     '潮風のシンフォニー (海风交响曲)',

@@ -6,12 +6,18 @@ import { parseBuffer } from '../../vendor/runtime/node_modules/music-metadata/li
 
 import PackedFile from '../../src/lib/packedfile.js'
 import { SONG_ORIGIN_VERSION } from '../../src/song/song-origin.js'
-import { PACE_METADATA_VERSION } from '../../src/util/song-meta.js'
+import {
+  ASSIST_PACE_METADATA_VERSION,
+  estimateAssistReferencePace,
+  PACE_METADATA_VERSION,
+} from '../../src/util/song-meta.js'
 import {
   analyzeSongTitle,
   SONG_TITLE_CLEANUP_VERSION,
 } from '../../src/song/song-title.js'
 import { validImage } from './qqmusic-api.js'
+import { artistResolutionSourceInfo } from './artist-package.js'
+import { normalizeArtistCredits } from './original-artist.js'
 
 const AUDIO_MIME = Object.freeze({
   '.aac': 'audio/aac',
@@ -117,16 +123,32 @@ export async function writeImportedSongPackage ({
   const titleCleanup = analyzeSongTitle(metadata.rawTitle || metadata.title, {
     language: metadata.language,
   })
+  if (!String(titleCleanup.title || '').trim()) {
+    throw new Error('A verified song title is required before packaging')
+  }
+  const artistNames = normalizeArtistCredits(metadata.artistNames?.length
+    ? metadata.artistNames
+    : metadata.artist)
+  if (!artistNames.length) {
+    throw new Error('A plausible artist is required before packaging')
+  }
+  const assistPace = estimateAssistReferencePace(
+    lyrics.lyricsCsv,
+    metadata.language,
+    { durationMs: audioInfo.duration * 1000 },
+  )
   const song = {
     title: titleCleanup.title,
     subtitle: metadata.subtitle || '',
-    artist: metadata.artist || '',
+    artist: artistNames.join(' / '),
     latin_title: titleCleanup.title,
     latin_subtitle: metadata.subtitle || '',
-    latin_artist: metadata.artist || '',
+    latin_artist: artistNames.join(' / '),
     language: metadata.language || 'U',
     cpm: lyrics.cpm,
     max_cpm: lyrics.maxCpm,
+    assist_cpm: assistPace.averageCpm,
+    assist_max_cpm: assistPace.peakCpm,
     duration: Math.ceil(audioInfo.duration),
     image: imageName,
     poster: posterName || undefined,
@@ -150,11 +172,14 @@ export async function writeImportedSongPackage ({
         metadata: true,
         audio_decode: true,
         lyrics_timed: true,
-        pronunciation_complete: true,
+        pronunciation_complete: ['verified', 'ruby-assisted'].includes(
+          lyrics.stats.pronunciationStatus || 'verified',
+        ),
         cover: true,
-        artist_original: Boolean(metadata.artistResolution?.resolved),
+        artist_original: metadata.artistResolution?.resolved === true,
         ...(source.checks || {}),
       },
+      artist_resolution: artistResolutionSourceInfo(metadata.artistResolution),
       cover: {
         strategy: cover.strategy || 'provider-artwork',
         verified_online: Boolean(cover.verifiedOnline),
@@ -177,6 +202,10 @@ export async function writeImportedSongPackage ({
           lyrics.stats.songSpecificPronunciationLines,
         pronunciation_override_lines:
           lyrics.stats.pronunciationOverrideLines,
+        pronunciation_status: lyrics.stats.pronunciationStatus || 'verified',
+        explicit_ruby_lines: lyrics.stats.explicitRubyLines || 0,
+        dictionary_pronunciation_lines: lyrics.stats.dictionaryPronunciationLines || 0,
+        pending_pronunciation_lines: lyrics.stats.pendingPronunciationLines || 0,
         timing_windows_adjusted:
           lyrics.stats.timingWindowsAdjusted || 0,
         instrumental_gap_ms_removed:
@@ -189,6 +218,12 @@ export async function writeImportedSongPackage ({
         model: 'demo-human-cadence',
         average: 'score-typing-time',
         peak: 'event-based-5-second-window',
+      },
+      assist_pace: {
+        version: ASSIST_PACE_METADATA_VERSION,
+        required_keys: assistPace.requiredKeys,
+        average: 'manual-anchor-typing-time',
+        peak: 'manual-anchor-event-based-5-second-window',
       },
     },
   }

@@ -12,7 +12,7 @@ function exactArrayBuffer (buffer) {
 export async function rewritePackedSongMetadata (
   existingSong,
   mutate,
-  { operation = 'metadata' } = {},
+  { operation = 'metadata', removeFiles = [] } = {},
 ) {
   const filename = existingSong?._local_filename
   if (!filename) throw new Error('Packed song filename is unavailable')
@@ -30,7 +30,7 @@ export async function rewritePackedSongMetadata (
 
     for (let index = 0; index < packed.file_count; index++) {
       const name = packed.file_name[index]
-      if (name === 'song.json') continue
+      if (name === 'song.json' || removeFiles.includes(name)) continue
       output.addFile(name, new Uint8Array(packed.file_buffer[index]))
     }
     output.addFile('song.json', encoder.encode(JSON.stringify(song)))

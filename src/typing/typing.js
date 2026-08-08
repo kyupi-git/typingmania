@@ -115,9 +115,9 @@ export default class Typing {
    * delay. Returning every transition lets the controller catch up in one
    * bounded pass; the loop is safe because current_line always increases.
    */
-  advanceTo (current_time) {
+  advanceTo (current_time, maxTransitions = Infinity) {
     const transitions = []
-    while (true) {
+    while (transitions.length < maxTransitions) {
       const line = this.getCurrentLine()
       if (!line || current_time <= line.end_time) break
       const lineId = this.current_line

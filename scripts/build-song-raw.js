@@ -8,6 +8,7 @@ import {
 } from '../src/util/ass.js'
 import {
   buildSongLyrics,
+  estimateAssistReferencePace,
   songMetaFromAss,
 } from '../src/util/song-meta.js'
 
@@ -63,6 +64,14 @@ if (mediaExt == '.mp4' || mediaExt == '.mkv' || mediaExt == '.webm' || mediaExt 
   songMetadata.audio = path.basename(mediaFile)
   songMetadata.duration = mediaDuration(mediaFile)
 }
+
+const assistPace = estimateAssistReferencePace(
+  lyricsCsv,
+  songMetadata.language,
+  { durationMs: Number(songMetadata.duration) * 1000 },
+)
+songMetadata.assist_cpm = assistPace.averageCpm
+songMetadata.assist_max_cpm = assistPace.peakCpm
 
 // Initialize packer
 const packer = new PackedFile()

@@ -1,6 +1,7 @@
 import { expect, jest, test } from '@jest/globals'
 
 import { resolveLrclibLyrics } from './lrclib-api.js'
+import { resetNetworkSourceHealth } from './network-source-planner.js'
 
 function response (value, { ok = true, status = 200 } = {}) {
   return { ok, status, json: async () => value }
@@ -44,4 +45,28 @@ test('LRCLIB rejects a similarly named recording with the wrong duration', async
     album: 'Example Album',
     duration: 240,
   }, { fetchImpl })).rejects.toThrow(/no verified/iu)
+})
+
+test('LRCLIB falls back to its compatible www endpoint', async () => {
+  resetNetworkSourceHealth()
+  const fetchImpl = jest.fn(async url => {
+    if (new URL(String(url)).hostname === 'lrclib.net') {
+      throw new TypeError('primary endpoint unavailable')
+    }
+    return response({
+      id: 43,
+      trackName: 'Mirror Song',
+      artistName: 'Mirror Artist',
+      albumName: 'Mirror Album',
+      duration: 201,
+      syncedLyrics: '[00:01.00]Verified line',
+    })
+  })
+  await expect(resolveLrclibLyrics({
+    title: 'Mirror Song',
+    artist: 'Mirror Artist',
+    album: 'Mirror Album',
+    duration: 201,
+  }, { fetchImpl })).resolves.toMatchObject({ trackId: '43' })
+  expect(fetchImpl).toHaveBeenCalledTimes(2)
 })

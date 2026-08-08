@@ -7,27 +7,19 @@ import {
   SONG_ORIGIN_VERSION,
 } from '../../src/song/song-origin.js'
 import {
-  fetchFirstAvailable,
-  fetchWithTimeout,
-} from './network.js'
+  fetchBangumiApiJson,
+  fetchBangumiWebsite,
+} from './bangumi-routes.js'
 import { resolveGeneralMediaWork } from './media-catalog-api.js'
 import { inferNetworkRegion } from './network-source-planner.js'
 
 export { SONG_ORIGIN_VERSION }
 
-const SONG_ORIGIN_CACHE_VERSION = 5
+const SONG_ORIGIN_CACHE_VERSION = 7
 const CACHE_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000
 const NEGATIVE_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
-const BANGUMI_SEARCH_URL =
-  'https://api.bgm.tv/v0/search/subjects?limit=20&offset=0'
-const BANGUMI_SUBJECT_URL = 'https://api.bgm.tv/v0/subjects'
-const BANGUMI_WEBSITE_ORIGINS = [
-  'https://bgm.tv',
-  'https://bangumi.tv',
-  'https://chii.in',
-]
 const USER_AGENT =
-  'TypingManiaNovel/20260726 (music metadata resolver)'
+  'TypingManiaNovel/20260808 (music metadata resolver)'
 
 function normalize (value) {
   return String(value || '')
@@ -269,6 +261,10 @@ function matchScore (query, metadata, parts, candidate, qqOriginalTitle) {
         ? -50
         : -20
   }
+  // A season-less query describes the direct/base production. A sequel may
+  // still fuzzy-match the localized wording, but must lose to an otherwise
+  // comparable unnumbered work unless the query explicitly names its season.
+  if (!querySeason && candidateSeason) score -= 18
 
   const evidence = normalize(evidenceText(candidate))
   const title = normalize(metadata.title)
@@ -378,6 +374,17 @@ function directProductionTitle (
   const primary = String(candidate?.name || '').trim()
   if (!primary) return null
 
+  // For a Japanese song, an all-Han candidate is commonly Bangumi's Chinese
+  // display title.  Region/tags are not proof that this string is the
+  // original title; require an explicit Japanese alias (or kana in the
+  // primary title) before accepting it.
+  if (
+    normalizedTrackLanguage(metadata) === 'ja' &&
+    !/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(primary) &&
+    looksChineseLocalizedText(primary) &&
+    !labeledTitleAliases(candidate).some(alias => aliasLanguage(alias) === 'ja')
+  ) return null
+
   // The catalog record is already the direct audiovisual production. Never
   // inspect its 原作/source-work field for a song origin. When a Japanese
   // release uses a distinct official title, select that named edition rather
@@ -469,9 +476,19 @@ function buildOrigin (parts, originalTitle, details = {}) {
     evidence: details.evidence || '',
     confidence: Number(details.confidence || 0),
     poster_url: details.posterUrl || undefined,
+    corroborated_by: Array.isArray(details.corroboratedBy) &&
+      details.corroboratedBy.length
+      ? [...new Set(details.corroboratedBy.map(String))]
+      : undefined,
     title_scope: 'direct-production',
     verified_at: new Date().toISOString(),
   }
+}
+
+function explicitSeasonNumber (value) {
+  return String(value || '').match(
+    /(?:season|series|第)\s*(\d+)\s*(?:季|期)?/iu,
+  )?.[1] || ''
 }
 
 export function needsDirectProductionTitleRefresh (origin, metadata) {
@@ -553,7 +570,14 @@ export function japaneseAlbumTitle (query, albums) {
 }
 
 function bangumiSubjectType (medium) {
-  if (['television', 'movie'].includes(medium)) return 6
+  if ([
+    'television',
+    'movie',
+    'documentary',
+    'commercial',
+    'variety',
+    'sports-event',
+  ].includes(medium)) return 6
   if (['visual-novel', 'jrpg', 'game'].includes(medium)) return 4
   return 2
 }
@@ -564,14 +588,13 @@ async function searchBangumiApi (
   timeoutMs,
   medium = 'tv',
 ) {
-  const response = await fetchWithTimeout(
+  const result = await fetchBangumiApiJson({
+    pathname: '/v0/search/subjects?limit=20&offset=0',
     fetchImpl,
-    BANGUMI_SEARCH_URL,
-    {
+    options: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': USER_AGENT,
       },
       body: JSON.stringify({
         keyword: query,
@@ -583,27 +606,26 @@ async function searchBangumiApi (
       }),
     },
     timeoutMs,
-  )
-  if (!response.ok) throw new Error(`Bangumi HTTP ${response.status}`)
-  const payload = await response.json()
+    accept: value => Array.isArray(value?.data),
+  })
+  const payload = result?.value || {}
   return Array.isArray(payload.data) ? payload.data : []
 }
 
 async function fetchBangumiSubject (id, fetchImpl, timeoutMs) {
   if (!/^\d+$/u.test(String(id || ''))) return null
-  const response = await fetchWithTimeout(
+  const result = await fetchBangumiApiJson({
+    pathname: `/v0/subjects/${id}`,
     fetchImpl,
-    `${BANGUMI_SUBJECT_URL}/${id}`,
-    {
+    options: {
       headers: {
-        Accept: 'application/json',
-        'User-Agent': USER_AGENT,
+        'Cache-Control': 'no-cache',
       },
     },
     timeoutMs,
-  )
-  if (!response.ok) throw new Error(`Bangumi subject HTTP ${response.status}`)
-  const subject = await response.json()
+    accept: value => String(value?.id || '') === String(id),
+  })
+  const subject = result?.value
   return subject && String(subject.id || '') === String(id)
     ? subject
     : null
@@ -663,26 +685,20 @@ async function searchBangumiWebsite (
   timeoutMs,
   medium = 'tv',
 ) {
-  const routes = BANGUMI_WEBSITE_ORIGINS.map(origin => (
-    `${origin}/subject_search/${encodeURIComponent(query)}?cat=${
+  const result = await fetchBangumiWebsite({
+    pathname: `/subject_search/${encodeURIComponent(query)}?cat=${
       bangumiSubjectType(medium)
-    }`
-  ))
-  const { response } = await fetchFirstAvailable(
+    }`,
     fetchImpl,
-    routes,
-    {
+    timeoutMs: Math.min(timeoutMs, 3600),
+    options: {
       headers: {
         Accept: 'text/html',
         'User-Agent': USER_AGENT,
       },
     },
-    {
-      timeoutMs: Math.min(timeoutMs, 3600),
-      perAttemptMs: 1200,
-    },
-  )
-  return parseBangumiWebsiteResults(await response.text(), medium)
+  })
+  return parseBangumiWebsiteResults(await result.value.text(), medium)
 }
 
 function broaderWorkQuery (value) {
@@ -794,6 +810,7 @@ export async function resolveSongOrigin ({
             evidence: match.evidence,
             confidence: match.confidence,
             posterUrl: match.posterUrl,
+            corroboratedBy: match.corroboratedBy,
           })
         : null
     } catch (error) {
@@ -808,6 +825,7 @@ export async function resolveSongOrigin ({
     'jrpg',
     'game',
   ])
+  let generalOrigin = null
   if (
     generalMedia &&
     (
@@ -815,38 +833,42 @@ export async function resolveSongOrigin ({
       ['hk', 'tw', 'kr', 'sea', 'us', 'eu', 'global'].includes(region)
     )
   ) {
-    const origin = await resolveGeneral()
-    if (origin) return origin
+    // Keep the first result as evidence, but still consult Bangumi. Returning
+    // here used to make a reachable general catalog suppress the more
+    // medium-specific Bangumi check on non-mainland networks.
+    generalOrigin = await resolveGeneral()
   }
 
   let candidates = []
   let websiteUsed = false
   let bangumiError = null
   try {
-    candidates = await searchBangumiWebsite(
+    candidates = await searchBangumiApi(
       parts.workTitle,
       fetchImpl,
       timeoutMs,
       parts.media,
     )
-    websiteUsed = candidates.length > 0
+    websiteUsed = false
     if (!candidates.length) {
-      candidates = await searchBangumiApi(
+      candidates = await searchBangumiWebsite(
         parts.workTitle,
         fetchImpl,
         timeoutMs,
         parts.media,
       )
+      websiteUsed = candidates.length > 0
     }
   } catch (error) {
     try {
-      candidates = await searchBangumiApi(
+      candidates = await searchBangumiWebsite(
         parts.workTitle,
         fetchImpl,
         timeoutMs,
         parts.media,
       )
-    } catch {
+      websiteUsed = candidates.length > 0
+    } catch (fallbackError) {
       bangumiError = error
       candidates = []
     }
@@ -944,7 +966,8 @@ export async function resolveSongOrigin ({
   }
 
   if (best) {
-    return buildOrigin(parts, best.verified.title, {
+    if (!generalTried) generalOrigin = await resolveGeneral()
+    const bangumiOrigin = buildOrigin(parts, best.verified.title, {
       originalLanguage: best.verified.language,
       titleSource: 'catalog-primary',
       catalog: 'bangumi',
@@ -958,10 +981,38 @@ export async function resolveSongOrigin ({
           ? 'catalog-fuzzy-localized-title'
           : 'catalog-exact-title',
       confidence: Math.min(1, best.score / 150),
+      corroboratedBy: generalOrigin?.catalog && namesEquivalent(
+        best.verified.title,
+        generalOrigin.work_title,
+      )
+        ? ['bangumi', generalOrigin.catalog]
+        : ['bangumi'],
     })
+    const realProduction = [
+      'television',
+      'movie',
+      'documentary',
+      'commercial',
+      'variety',
+      'sports-event',
+    ].includes(parts.media)
+    if (
+      realProduction &&
+      generalOrigin &&
+      !parts.season &&
+      explicitSeasonNumber(bangumiOrigin.work_title) &&
+      !explicitSeasonNumber(generalOrigin.work_title)
+    ) {
+      // A broad series query must not silently become season 1 merely because
+      // that is the first Bangumi real-subject hit. Keep the independently
+      // verified series/film identity unless the song relationship names a
+      // particular season.
+      return generalOrigin
+    }
+    return bangumiOrigin
   }
 
-  const generalOrigin = await resolveGeneral()
+  if (!generalTried) generalOrigin = await resolveGeneral()
   if (generalOrigin) return generalOrigin
 
   if (qqOriginal) {
@@ -1000,8 +1051,6 @@ export default class SongOriginResolver {
     this.timeoutMs = timeoutMs
     this.cache = { version: SONG_ORIGIN_CACHE_VERSION, entries: {} }
     this.loaded = false
-    this.consecutiveNetworkFailures = 0
-    this.networkDisabled = false
     this.lastLookupFailed = false
   }
 
@@ -1039,7 +1088,7 @@ export default class SongOriginResolver {
     await fs.writeFile(this.filename, JSON.stringify(this.cache), 'utf8')
   }
 
-  async resolve (metadata, cover = null) {
+  async resolve (metadata, cover = null, { forceRefresh = false } = {}) {
     this.lastLookupFailed = false
     const key = cacheKey(metadata)
     if (!key) return null
@@ -1050,6 +1099,7 @@ export default class SongOriginResolver {
       ? CACHE_MAX_AGE_MS
       : NEGATIVE_CACHE_MAX_AGE_MS
     if (
+      !forceRefresh &&
       entry &&
       age >= 0 &&
       age < maximumAge &&
@@ -1059,38 +1109,19 @@ export default class SongOriginResolver {
     }
 
     let origin = null
-    if (this.networkDisabled) {
-      try {
-        origin = await resolveSongOrigin({
-          metadata,
-          cover,
-          fetchImpl: async () => {
-            throw new TypeError('catalog lookup disabled for this batch')
-          },
-          timeoutMs: this.timeoutMs,
-        })
-      } catch {
-        this.lastLookupFailed = true
-        return null
-      }
-    } else {
-      try {
-        origin = await resolveSongOrigin({
-          metadata,
-          cover,
-          fetchImpl: this.fetchImpl,
-          timeoutMs: this.timeoutMs,
-        })
-        this.consecutiveNetworkFailures = 0
-      } catch {
-        this.lastLookupFailed = true
-        this.consecutiveNetworkFailures++
-        // A single route failure must not suppress the remainder of a mixed
-        // provider batch. Open the local circuit only after three consecutive
-        // songs exhaust all catalog routes.
-        if (this.consecutiveNetworkFailures >= 3) this.networkDisabled = true
-        return null
-      }
+    try {
+      origin = await resolveSongOrigin({
+        metadata,
+        cover,
+        fetchImpl: this.fetchImpl,
+        timeoutMs: this.timeoutMs,
+      })
+    } catch {
+      // A route outage is not evidence that the production is unknown. Do not
+      // write a negative cache entry and do not disable later songs: another
+      // source or a later request may still succeed on this device.
+      this.lastLookupFailed = true
+      return null
     }
     this.cache.entries[key] = {
       checked_at: new Date().toISOString(),

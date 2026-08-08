@@ -66,6 +66,8 @@ export default class DemoPlayer {
     this.schedule = { keys: [], times: [] }
     this.cursor = 0
     this.stopped = false
+    this.error_count = 0
+    this.last_input_time = -Infinity
   }
 
   prepareLine (lineId, line) {
@@ -89,16 +91,36 @@ export default class DemoPlayer {
     if (!line || line.isCompleted()) return 0
 
     let typed = 0
+    let attempts = 0
     while (
       this.cursor < this.schedule.times.length &&
       currentTime >= this.schedule.times[this.cursor] &&
-      !line.isCompleted()
+      !line.isCompleted() &&
+      attempts++ < this.schedule.times.length + 1
     ) {
       const key = nextPlayableTypingKey(line.getRemainingText())
       if (!key) break
-      this.typer.type(key, { showFeedback: true })
-      this.cursor++
-      typed++
+      try {
+        const inputTime = Math.max(
+          this.schedule.times[this.cursor],
+          this.last_input_time,
+        )
+        const accepted = this.typer.type(key, {
+          showFeedback: true,
+          inputTime,
+        })
+        if (accepted < 0) break
+        this.cursor++
+        typed++
+        this.last_input_time = inputTime
+        this.error_count = 0
+      } catch (error) {
+        this.error_count++
+        if (this.error_count <= 3 || this.error_count % 120 === 0) {
+          console.error('Demo input recovered from a runtime error', error)
+        }
+        break
+      }
     }
     return typed
   }

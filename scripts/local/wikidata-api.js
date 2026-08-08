@@ -53,7 +53,17 @@ function entityLanguages (entity) {
     .filter(Boolean)
 }
 
-function originalTitle (entity) {
+function languageScriptMatches (language, title) {
+  const value = String(title || '')
+  if (language === 'ja') {
+    return /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(value)
+  }
+  if (language === 'zh') return /\p{Script=Han}/u.test(value)
+  if (language === 'ko') return /\p{Script=Hangul}/u.test(value)
+  return true
+}
+
+function originalTitle (entity, query = '') {
   const languages = entityLanguages(entity)
   const namedTitles = values(entity, 'P1476')
     .map(value => ({
@@ -61,12 +71,25 @@ function originalTitle (entity) {
       language: String(value?.language || '').trim(),
     }))
     .filter(value => value.title)
-  const preferred = namedTitles.find(value => languages.includes(value.language)) ||
-    namedTitles[0]
+  const preferred = namedTitles.find(value => (
+    languages.includes(value.language) &&
+    (
+      languageScriptMatches(value.language, value.title) ||
+      catalogTextSimilarity(query, value.title) >= 0.96
+    )
+  )) || namedTitles.find(value => (
+    !['ja', 'zh', 'ko'].includes(value.language)
+  ))
   if (preferred) return preferred
   for (const language of languages) {
     const label = String(entity?.labels?.[language]?.value || '').trim()
-    if (label) return { title: label, language }
+    if (
+      label &&
+      (
+        languageScriptMatches(language, label) ||
+        catalogTextSimilarity(query, label) >= 0.96
+      )
+    ) return { title: label, language }
   }
   return null
 }
@@ -112,6 +135,12 @@ function mediaCompatible (expected, actual) {
   if (expected === actual) return true
   if (expected === 'tv') return ['television', 'variety'].includes(actual)
   if (expected === 'film') return ['film', 'movie'].includes(actual)
+  if (expected === 'movie') return ['film', 'movie'].includes(actual)
+  if (expected === 'jrpg') return ['jrpg', 'game'].includes(actual)
+  if (expected === 'game') {
+    return ['game', 'jrpg', 'visual-novel'].includes(actual)
+  }
+  if (expected === 'variety') return ['variety', 'television'].includes(actual)
   return false
 }
 
@@ -144,7 +173,7 @@ async function fetchJson (fetchImpl, url, timeoutMs) {
     headers: {
       Accept: 'application/json',
       'User-Agent':
-        'TypingManiaNovel/20260726 (verified production metadata lookup)',
+        'TypingManiaNovel/20260808 (verified production metadata lookup)',
     },
   }, timeoutMs)
   if (!response.ok) throw new Error(`Wikidata HTTP ${response.status}`)
@@ -213,7 +242,7 @@ export async function searchWikidataWork (
       ...aliases.map(value => catalogTextSimilarity(query, value)),
       0,
     )
-    const original = originalTitle(entity)
+    const original = originalTitle(entity, query)
     if (!original?.title || similarity < 0.84) continue
     candidates.push({
       title: original.title,

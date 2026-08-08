@@ -324,15 +324,21 @@ export async function fetchTrackMetadataWithFallback (
   } = {},
 ) {
   let directError = null
+  let networkFailure = false
   try {
     return await fetchMetadata(mediaMid, cookie)
   } catch (error) {
     directError = error
+    networkFailure = isQQMusicNetworkError(error)
   }
 
   const resolveCandidate = async candidate => {
     if (!candidate?.songMid) return null
-    return fetchMetadata(candidate.songMid, cookie)
+    const metadata = await fetchMetadata(candidate.songMid, cookie)
+    if (!metadata?.mediaMid || String(metadata.mediaMid) !== String(mediaMid)) {
+      throw new Error('recovered metadata media ID does not match cached media')
+    }
+    return metadata
   }
   if (candidateCache.has(mediaMid)) {
     try {
@@ -349,6 +355,8 @@ export async function fetchTrackMetadataWithFallback (
     seenQueries.add(normalized)
     uniqueHints.push(query)
   }
+  // QRC catalogs can be very large; bounded hint recovery keeps imports responsive.
+  uniqueHints.splice(12)
   const width = Math.max(1, Math.min(6, Number(batchSize) || 4))
   for (let offset = 0; offset < uniqueHints.length; offset += width) {
     const batch = uniqueHints.slice(offset, offset + width)
@@ -363,6 +371,7 @@ export async function fetchTrackMetadataWithFallback (
         searchCache.set(query, candidates)
         return candidates
       } catch (error) {
+        if (isQQMusicNetworkError(error)) networkFailure = true
         searchCache.delete(query)
         throw error
       }
@@ -381,6 +390,7 @@ export async function fetchTrackMetadataWithFallback (
       } catch {}
     }
   }
+  if (directError && !networkFailure) directError.code = 'QQMUSIC_METADATA_UNAVAILABLE'
   throw directError || new Error('metadata is unavailable')
 }
 
@@ -487,6 +497,7 @@ export async function searchQQMusicTracks (
       .map(artist => stripSearchMarkup(artist.name))
       .filter(Boolean)
     return {
+      songId: String(raw.songid || raw.id || ''),
       songMid: raw.songmid || '',
       mediaMid: raw.strMediaMid || raw.media_mid || raw.file?.media_mid || '',
       title: stripSearchMarkup(raw.songname),
@@ -519,9 +530,10 @@ export function parseOfficialLyricLines (
   }
   const candidates = timed.length ? timed : plain
   const lines = filterLyricLines(candidates, metadata, { romanized }).kept
+  const durationMs = Number(metadata.duration) > 0 ? Number(metadata.duration) * 1000 : 0
   return lines.map((line, index) => ({
     ...line,
-    end: lines[index + 1]?.start ?? null,
+    end: lines[index + 1]?.start ?? (durationMs || null),
   }))
 }
 

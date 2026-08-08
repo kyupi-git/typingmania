@@ -1,20 +1,52 @@
 import {
+  catalogIdentity,
   catalogMetadataConfidence,
   catalogTextSimilarity,
 } from './catalog-identity.js'
 import { matchQQMusicTrack } from './imported-song-enrichment.js'
 import { searchItunesTrack } from './itunes-search-api.js'
 import { searchKugouTrack } from './kugou-api.js'
-import { searchMusicBrainzTrack } from './musicbrainz-api.js'
+import {
+  fetchCoverArtArchive,
+  searchMusicBrainzTrack,
+} from './musicbrainz-api.js'
 import {
   fetchNeteaseTrackDetail,
+  fetchNeteaseCover,
   metadataFromNeteaseRecord,
   searchNeteaseTrack,
 } from './netease-api.js'
+import { fetchWithTimeout } from './network.js'
+import OriginalArtistResolver, {
+  looksLocalizedArtistName,
+  normalizeArtistCredits,
+} from './original-artist.js'
 import {
+  collectNetworkSources,
   inferNetworkRegion,
-  tryNetworkSources,
 } from './network-source-planner.js'
+import { fetchOfficialCover, validImage } from './qqmusic-api.js'
+
+async function fetchUrlCover (url, strategy) {
+  if (!/^https:\/\//iu.test(String(url || ''))) return null
+  const response = await fetchWithTimeout(globalThis.fetch, url, {
+    headers: { Accept: 'image/*' },
+  }, 4200)
+  if (!response.ok) return null
+  const buffer = Buffer.from(await response.arrayBuffer())
+  if (!validImage(buffer)) return null
+  const contentType = response.headers.get('content-type') || ''
+  return {
+    buffer,
+    extension: contentType.includes('png')
+      ? '.png'
+      : contentType.includes('webp')
+        ? '.webp'
+        : '.jpg',
+    verifiedOnline: true,
+    strategy,
+  }
+}
 
 export function mergeCatalogMetadata (local, remote = {}) {
   const measured = catalogMetadataConfidence(local, remote)
@@ -25,6 +57,28 @@ export function mergeCatalogMetadata (local, remote = {}) {
     confidence: measured.confidence,
     verifiedFields: measured.verifiedFields,
   }
+  const identityAuthority = Boolean(
+    verification.canonicalId ||
+    verification.source === 'multi-source-consensus' ||
+    /(?:exact|provider)/iu.test(String(verification.source || ''))
+  )
+  // A caller-supplied `safe` flag cannot turn a partial artist overlap into a
+  // replacement. Exact provider IDs and independent consensus are the only
+  // exceptions; ordinary fuzzy catalog rows retain the existing identity.
+  const localLooksTranslated = looksLocalizedArtistName(local?.artist, {
+    language: remote?.language || local?.language ||
+      (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(String(remote?.artist || ''))
+        ? 'JP' : ''),
+  }) || (
+    !/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(String(local?.artist || '')) &&
+    /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(String(remote?.artist || '')) &&
+    measured.titleSimilarity === 1
+  )
+  const localizedAliasRepair = localLooksTranslated &&
+    remote?.artistResolution?.resolved === true
+  const artistIdentitySafe = (measured.artistSimilarity >= 0.72 &&
+    (measured.titleSimilarity >= 0.82 || identityAuthority)) ||
+    localizedAliasRepair
   const safe = verification.safe !== false && (
     verification.safe === true ||
     verification.verifiedFields?.length > 0
@@ -32,6 +86,16 @@ export function mergeCatalogMetadata (local, remote = {}) {
   const verified = new Set(
     safe ? verification.verifiedFields || [] : [],
   )
+  if (!artistIdentitySafe && !identityAuthority) {
+    verified.delete('artist')
+    verified.delete('artistNames')
+  }
+  if (
+    verified.has('title') &&
+    !catalogTitleCorrectionAllowed(local, remote, verification)
+  ) {
+    verified.delete('title')
+  }
   if (safe) {
     if (remote.subtitle) verified.add('subtitle')
     if (remote.albumPic) verified.add('albumPic')
@@ -54,6 +118,10 @@ export function mergeCatalogMetadata (local, remote = {}) {
       : local.artistNames?.length
         ? local.artistNames
         : remote.artistNames || [],
+    artistResolution: verified.has('artistNames') &&
+      remote.artistResolution?.resolved === true
+      ? remote.artistResolution
+      : local.artistResolution || remote.artistResolution,
     album: preferRemote('album'),
     albumId: remote.albumId || local.albumId || '',
     albumMid: remote.albumMid || local.albumMid || '',
@@ -70,6 +138,16 @@ export function mergeCatalogMetadata (local, remote = {}) {
       verifiedFields: [...verified],
     },
   }
+}
+
+function catalogTitleCorrectionAllowed (local, remote, verification) {
+  if (catalogIdentity(local?.title) === catalogIdentity(remote?.title)) return true
+  if (verification?.source === 'multi-source-consensus') return true
+  return Boolean(
+    verification?.canonicalId ||
+    verification?.canonicalAlias === true ||
+    verification?.aliasEvidence === true,
+  )
 }
 
 function consensusCatalogMatch (matches) {
@@ -117,17 +195,67 @@ function consensusCatalogMatch (matches) {
   return null
 }
 
-function trustedMetadata (remote, source) {
+function corroborateCatalogMatch (primary, matches) {
+  if (!primary?.metadata) return primary || null
+  const corroboratedBy = []
+  let strongestAgreement = 0
+  for (const candidate of matches) {
+    if (
+      candidate === primary ||
+      !candidate?.metadata ||
+      candidate.service === primary.service
+    ) continue
+    const agreement = catalogMetadataConfidence(
+      primary.metadata,
+      candidate.metadata,
+    )
+    if (!agreement.safe || agreement.confidence < 0.86) continue
+    corroboratedBy.push(candidate.service)
+    strongestAgreement = Math.max(strongestAgreement, agreement.confidence)
+  }
+  if (!corroboratedBy.length) return primary
+  const verification = primary.metadata.catalogVerification || {}
+  return {
+    ...primary,
+    metadata: {
+      ...primary.metadata,
+      catalogVerification: {
+        ...verification,
+        source: verification.source || primary.service,
+        safe: true,
+        confidence: Math.max(
+          Number(verification.confidence) || 0,
+          strongestAgreement,
+        ),
+        corroboratedBy: [
+          ...new Set([
+            ...(verification.corroboratedBy || []),
+            ...corroboratedBy,
+          ]),
+        ],
+      },
+    },
+  }
+}
+
+export function trustedMetadata (remote, source, language = '') {
+  const artistNames = Array.isArray(remote.artistNames) && remote.artistNames.length
+    ? normalizeArtistCredits(remote.artistNames)
+    : String(remote.artist || '').split(/\s*[;/]\s*/u).filter(Boolean)
+  const artistsAreOriginal = artistNames.length > 0 && artistNames.every(name => (
+    !looksLocalizedArtistName(name, {
+      language: remote.language || language,
+    })
+  ))
   return {
     ...remote,
     catalogVerification: {
       source,
-      safe: true,
-      confidence: 0.94,
+      safe: artistsAreOriginal,
+      confidence: artistsAreOriginal ? 0.94 : 0.72,
       verifiedFields: [
         'title',
-        'artist',
-        'artistNames',
+        ...(artistsAreOriginal ? ['artist', 'artistNames'] : []),
         'album',
         'duration',
         ...(remote.subtitle ? ['subtitle'] : []),
@@ -138,6 +266,7 @@ function trustedMetadata (remote, source) {
 }
 
 export async function resolveImportedCatalogMatch ({
+  root = '',
   metadata,
   provider,
   qqCookie = '',
@@ -147,6 +276,9 @@ export async function resolveImportedCatalogMatch ({
     (excludeServices || []).map(value => String(value)),
   )
   const region = inferNetworkRegion()
+  const originalArtistResolver = root
+    ? new OriginalArtistResolver({ root, cookie: qqCookie })
+    : null
   const sources = [
     {
       id: 'qqmusic-catalog',
@@ -161,13 +293,28 @@ export async function resolveImportedCatalogMatch ({
         global: 0,
       },
       run: async () => {
-        const detail = await matchQQMusicTrack(metadata, { qqCookie })
+        let detail = await matchQQMusicTrack(metadata, { qqCookie })
+        if (detail?.artists?.length && originalArtistResolver) {
+          detail = await originalArtistResolver.resolveMetadata(detail)
+        }
+        const cover = detail?.albumMid
+          ? await fetchOfficialCover(detail.albumMid, qqCookie).catch(() => null)
+          : null
         return detail?.songMid
           ? {
               service: 'qqmusic',
               id: detail.songMid,
               cookie: qqCookie,
-              metadata: trustedMetadata(detail, 'qqmusic-catalog'),
+              metadata: trustedMetadata(
+                detail,
+                'qqmusic-catalog',
+                metadata.language,
+              ),
+              cover: cover && {
+                ...cover,
+                albumMid: detail.albumMid,
+                album: detail.album,
+              },
             }
           : null
       },
@@ -191,10 +338,22 @@ export async function resolveImportedCatalogMatch ({
         const remote = detail
           ? metadataFromNeteaseRecord(detail, metadata)
           : metadata
+        const cover = remote.albumPic
+          ? await fetchNeteaseCover(remote.albumPic).catch(() => null)
+          : null
         return {
           service: 'netease',
           id: String(matched.id),
-          metadata: trustedMetadata(remote, 'netease-catalog'),
+          metadata: trustedMetadata(
+            remote,
+            'netease-catalog',
+            metadata.language,
+          ),
+          cover: cover && {
+            ...cover,
+            albumMid: remote.albumId,
+            album: remote.album,
+          },
         }
       },
     },
@@ -226,7 +385,7 @@ export async function resolveImportedCatalogMatch ({
             artistNames: artists,
             album: track.album,
             duration: track.duration,
-          }, 'kugou-catalog'),
+          }, 'kugou-catalog', metadata.language),
         }
       },
     },
@@ -242,10 +401,20 @@ export async function resolveImportedCatalogMatch ({
         us: 46,
         global: 35,
       },
-      run: () => searchItunesTrack(metadata, {
-        region,
-        allowIdentityRepair: true,
-      }),
+      run: async () => {
+        const matched = await searchItunesTrack(metadata, {
+          region,
+          allowIdentityRepair: true,
+        })
+        if (!matched) return null
+        const cover = matched.metadata?.albumPic
+          ? await fetchUrlCover(
+              matched.metadata.albumPic,
+              'itunes-exact-release',
+            ).catch(() => null)
+          : null
+        return { ...matched, cover }
+      },
     },
     {
       id: 'musicbrainz-catalog',
@@ -259,18 +428,28 @@ export async function resolveImportedCatalogMatch ({
         us: 50,
         global: 45,
       },
-      run: () => searchMusicBrainzTrack(metadata, {
-        allowIdentityRepair: true,
-      }),
+      run: async () => {
+        const matched = await searchMusicBrainzTrack(metadata, {
+          allowIdentityRepair: true,
+        })
+        if (!matched) return null
+        const releaseId = matched.metadata?.musicBrainzReleaseId
+        const cover = releaseId
+          ? await fetchCoverArtArchive(releaseId).catch(() => null)
+          : null
+        return { ...matched, cover }
+      },
     },
   ]
   const repairCandidates = []
-  let resolved = null
+  let resolved = []
   try {
-    resolved = await tryNetworkSources(
+    resolved = await collectNetworkSources(
       sources.filter(source => !excluded.has(source.service)),
       {
         region,
+        maxAccepted: 2,
+        maxAttempts: 5,
         accept: value => (
           value?.metadata?.catalogVerification?.safe === true
         ),
@@ -285,7 +464,8 @@ export async function resolveImportedCatalogMatch ({
     // A failed optional catalog route must not hide corroborated results from
     // other reachable sources.
   }
-  return resolved?.value ||
-    consensusCatalogMatch(repairCandidates) ||
+  const accepted = resolved.map(item => item.value).filter(Boolean)
+  return corroborateCatalogMatch(accepted[0], accepted) ||
+    consensusCatalogMatch([...accepted, ...repairCandidates]) ||
     null
 }

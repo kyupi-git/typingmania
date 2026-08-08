@@ -50,15 +50,39 @@ normal milliseconds per playable key so a following interlude is not assigned
 to the previous line. Lyrics can be reconciled against exact QQ Music,
 NetEase, KuGou KRC, or LRCLIB timelines; regional priority, success, failure
 cooldown, and latency adapt route order. Japanese lines containing Kanji
-require a verified track-specific timed reading; the importer never
-substitutes a dictionary guess. Missing optional art uses a neutral bundled
+prefer explicit ruby or a verified track-specific timed reading. When no
+trusted online reading is available, bundled dictionary output may fill
+playable gaps but remains pending. Missing optional art uses a neutral bundled
 image rather than discarding an otherwise playable song.
 
-The same strict metadata path is available later through **Refresh info**.
+The lyric resolver checks several safely matched release records from QQ Music,
+NetEase, and KuGou when the first record has main lyrics but no pronunciation.
+It also verifies that the playable text is the original-language lyric layer.
+A Chinese translation attached to a Japanese recording is rejected even when
+it has a complete timeline and pinyin; the source audio remains untouched and
+can be tried again after another verified pronunciation source becomes
+available.
+
+Artist labels are treated independently from lyric language. Japanese artists
+shown as an all-Han localized alias are checked through singer details and an
+independent exact-track catalog before they can replace the provider's native
+credit. If proof is temporarily unavailable, a trustworthy provider or
+embedded label may remain with a white `*` pending marker; biography,
+copyright, unknown, and poisoned values remain blank.
+
+The same strict metadata path is available later through **Refresh song info**
+inside **Song info & editing**.
 NetEase track details and album artwork require the stored numeric track ID to
 still match the title, artist, and duration. Work-title and poster enrichment
 uses a strict cross-catalog recording match and keeps any conflicting existing
 origin or attachment unchanged.
+When exact provider artwork is reachable, it is preferred to the image embedded
+in the downloaded audio because the provider track ID and release can be
+verified. Embedded artwork remains the offline fallback. Bangumi production
+and poster requests can use health-ranked official site aliases and public
+API/image mirrors after the official route fails. The two compatible NetEase
+API endpoints are also ranked separately by the non-blocking startup preflight.
+No NetEase session material is sent to Bangumi mirrors.
 
 The player selects 1–500 songs (10 by default) in an in-game submenu. The batch stops after that
 many newly added tracks or when candidates are exhausted. A smaller available

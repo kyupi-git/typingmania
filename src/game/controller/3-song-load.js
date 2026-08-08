@@ -2,6 +2,7 @@ import Typing from '../../typing/typing.js'
 import SyncedVideoOverlay from '../../media/synced-video-overlay.js'
 import { shouldResolveMusicVideo } from '../../song/starter-song.js'
 import Score from '../score.js'
+import { estimateAssistReferencePace } from '../../util/song-meta.js'
 
 async function localSession (timeoutMs = 1400) {
   const controller = new AbortController()
@@ -109,9 +110,21 @@ export default class SongLoadController {
     this.game.loading_screen.setSubText(t('songLoad.lyrics'))
     try {
       this.game.typing = new Typing(song.lyrics_csv)
-      this.game.score = new Score(this.game.typing.getScoringCharCount(), {
-        totalLines: this.game.typing.getPlayableLineCount(),
-      })
+      const assistPace = estimateAssistReferencePace(
+        this.game.typing,
+        song.language,
+        { durationMs: Number(song.duration) * 1000 },
+      )
+      song.assist_cpm = assistPace.averageCpm
+      song.assist_max_cpm = assistPace.peakCpm
+      this.game.score = new Score(
+        this.game.game_mode === 'assist'
+          ? assistPace.requiredKeys
+          : this.game.typing.getScoringCharCount(),
+        {
+          totalLines: this.game.typing.getPlayableLineCount(),
+        },
+      )
     } catch (e) {
       console.log(e)
       this.game.loading_screen.setMainText(t('loading.error'))

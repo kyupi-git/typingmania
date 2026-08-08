@@ -11,7 +11,7 @@ import {
   White,
 } from './0-common.js'
 import SongCollection from '../song/songcollection.js'
-import { CENTER } from '../graphics/styles.js'
+import { CENTER, Fill } from '../graphics/styles.js'
 import {
   displayCollectionName,
   displaySongTitle,
@@ -24,6 +24,8 @@ import {
   POINTER_APPLY_CODE,
 } from '../game/menu-navigation.js'
 import LibraryEditorDialog from './library-editor-dialog.js'
+import NetworkStatusDialog from './network-status-dialog.js'
+import PlayStyleDialog from './play-style-dialog.js'
 import { APP_VERSION, PROJECT_URL } from '../app-meta.js'
 
 const IMPORT_SOURCES = ['qqMusic', 'netease', 'appleMusic', 'localFolder']
@@ -45,6 +47,7 @@ const ABOUT_CREDIT_GROUPS = Object.freeze([
       ['Python', 'https://www.python.org/'],
       ['FFmpeg', 'https://ffmpeg.org/'],
       ['music-metadata', 'https://github.com/Borewit/music-metadata'],
+      ['Undici', 'https://github.com/nodejs/undici'],
     ],
   },
   {
@@ -98,6 +101,8 @@ const ABOUT_CREDIT_GROUPS = Object.freeze([
       ['AnimeThemes', 'https://animethemes.moe/'],
       ['AniList', 'https://anilist.co/'],
       ['Bangumi API', 'https://bangumi.github.io/api/'],
+      ['VNDB', 'https://vndb.org/d11'],
+      ['Steam Store', 'https://store.steampowered.com/'],
       ['TVmaze', 'https://www.tvmaze.com/api'],
       ['TMDB', 'https://www.themoviedb.org/'],
       ['Wikidata', 'https://www.wikidata.org/'],
@@ -114,6 +119,16 @@ const ABOUT_CREDIT_GROUPS = Object.freeze([
         'https://developers.google.com/youtube/iframe_api_reference',
       ],
       ['Niconico', 'https://www.nicovideo.jp/'],
+    ],
+  },
+  {
+    key: 'about.credit.networkRoutes',
+    links: [
+      ['Bangumi anibt.net mirror', 'https://bgmapi.anibt.net/'],
+      ['Bangumi bangumi.lol mirror', 'https://api.bangumi.lol/'],
+      ['Cloudflare trace', 'https://www.cloudflare.com/cdn-cgi/trace'],
+      ['IP.SB', 'https://ip.sb/api/'],
+      ['ipapi', 'https://ipapi.co/api/'],
     ],
   },
   {
@@ -146,7 +161,7 @@ export default class MenuScreen extends Screen {
     this.current_mode = 'normal'
     this.key_effects_enabled = true
     this.music_video_enabled = false
-    this.demo_mode_enabled = false
+    this.play_style = 'normal'
     this.song_select_handler = null
     this.songScrollHandler = null
     this.dialogOpen = false
@@ -172,6 +187,8 @@ export default class MenuScreen extends Screen {
     this.resetScopeDetails = []
     this.resetScopeRows = []
     this.libraryEditorDialog = new LibraryEditorDialog(i18n)
+    this.networkStatusDialog = new NetworkStatusDialog(i18n)
+    this.playStyleDialog = new PlayStyleDialog(i18n)
     const languageOptions = SUPPORTED_LOCALES.map((locale, index) => {
       const row = Group(660, 390 + index * 105, 600, 78, [
         this.language_option_backgrounds[index] = Box(0, 0, 600, 78)
@@ -230,10 +247,10 @@ export default class MenuScreen extends Screen {
           .font(UIFont.size(32))
           .color(White)
           .align(CENTER),
-        this.importSourceLabels[index] = Txt(92, 6, 570, 36)
+        this.importSourceLabels[index] = Txt(92, 6, 590, 36)
           .font(UIFont.size(28))
           .color(White),
-        this.importSourceDetails[index] = Txt(92, 47, 570, 27)
+        this.importSourceDetails[index] = Txt(92, 47, 590, 27)
           .font(UIFont.size(18))
           .color(Gray)
           .noOverflow(),
@@ -258,10 +275,10 @@ export default class MenuScreen extends Screen {
           .font(UIFont.size(28))
           .color(White)
           .align(CENTER),
-        this.resetScopeLabels[index] = Txt(92, 4, 570, 32)
+        this.resetScopeLabels[index] = Txt(92, 4, 590, 32)
           .font(UIFont.size(25))
           .color(White),
-        this.resetScopeDetails[index] = Txt(92, 40, 570, 25)
+        this.resetScopeDetails[index] = Txt(92, 40, 590, 25)
           .font(UIFont.size(16))
           .color(Gray)
           .noOverflow(),
@@ -302,54 +319,35 @@ export default class MenuScreen extends Screen {
           .noOverflow(),
       ]).layer(130),
 
-      this.dedupe_button = Group(1335, 145, 550, 58, [
-        Box(0, 0, 550, 58).fill(UIColor).stroke(BtnBorder).radius(8),
-        this.dedupe_label = Txt(12, 0, 526, 58)
-          .font(UIFont.size(22))
-          .color(White)
-          .align(CENTER)
-          .noOverflow(),
-      ]).layer(130),
-
       // Music import source selection
-      this.import_music_button = Group(30, 930, 175, 80, [
-        Box(0, 0, 175, 80).fill(UIColor).stroke(BtnBorder).radius(8),
-        this.import_music_label = Txt(8, 0, 159, 80).font(UIFont.size(16)).color(White).align(CENTER).noOverflow(),
+      this.import_music_button = Group(30, 930, 145, 80, [
+        Box(0, 0, 145, 80).fill(UIColor).stroke(BtnBorder).radius(8),
+        this.import_music_label = Txt(7, 0, 131, 80).font(UIFont.size(15)).color(White).align(CENTER).noOverflow(),
       ]).layer(130),
 
-      // Multi-select editor for locally managed song packages
-      this.editLibraryButton = Group(215, 930, 175, 80, [
-        Box(0, 0, 175, 80).fill(UIColor).stroke(BtnBorder).radius(8),
-        this.editLibraryLabel = Txt(8, 0, 159, 80)
-          .font(UIFont.size(16))
+      // Song information, completeness, refresh, deduplication, and deletion.
+      this.editLibraryButton = Group(183, 930, 185, 80, [
+        Box(0, 0, 185, 80).fill(UIColor).stroke(BtnBorder).radius(8),
+        this.editLibraryLabel = Txt(8, 0, 169, 80)
+          .font(UIFont.size(15))
           .color(White)
           .align(CENTER)
           .noOverflow(),
       ]).layer(130),
 
       // Restore the verified starter library and remove every added song
-      this.reset_library_button = Group(400, 930, 175, 80, [
-        Box(0, 0, 175, 80).fill(UIColor).stroke(BtnBorder).radius(8),
-        this.reset_library_label = Txt(8, 0, 159, 80).font(UIFont.size(16)).color(White).align(CENTER).noOverflow(),
-      ]).layer(130),
-
-      // Safe, user-triggered metadata, direct-work, poster, and cover refresh.
-      this.metadata_refresh_button = Group(585, 930, 175, 80, [
-        Box(0, 0, 175, 80).fill(UIColor).stroke(BtnBorder).radius(8),
-        this.metadata_refresh_label = Txt(8, 0, 159, 80)
-          .font(UIFont.size(16))
-          .color(White)
-          .align(CENTER)
-          .noOverflow(),
+      this.reset_library_button = Group(376, 930, 155, 80, [
+        Box(0, 0, 155, 80).fill(UIColor).stroke(BtnBorder).radius(8),
+        this.reset_library_label = Txt(7, 0, 141, 80).font(UIFont.size(15)).color(White).align(CENTER).noOverflow(),
       ]).layer(130),
 
       // Optional falling-key feedback
-      this.key_effects_button = Group(770, 930, 120, 80, [
-        this.key_effects_background = Box(0, 0, 120, 80)
+      this.key_effects_button = Group(539, 930, 110, 80, [
+        this.key_effects_background = Box(0, 0, 110, 80)
           .fill(UIColor)
           .stroke(BtnBorder)
           .radius(8),
-        this.key_effects_label = Txt(6, 0, 108, 80)
+        this.key_effects_label = Txt(2, 0, 106, 80)
           .font(UIFont.size(12))
           .color(White)
           .align(CENTER)
@@ -357,25 +355,25 @@ export default class MenuScreen extends Screen {
       ]).layer(130),
 
       // Human-paced perfect-play demonstration
-      this.demo_mode_button = Group(900, 930, 120, 80, [
-        this.demo_mode_background = Box(0, 0, 120, 80)
+      this.play_style_button = Group(657, 930, 270, 80, [
+        this.play_style_background = Box(0, 0, 270, 80)
           .fill(UIColor)
           .stroke(BtnBorder)
           .radius(8),
-        this.demo_mode_label = Txt(6, 0, 108, 80)
-          .font(UIFont.size(12))
+        this.play_style_label = Txt(8, 0, 254, 80)
+          .font(UIFont.size(14))
           .color(White)
           .align(CENTER)
           .noOverflow(),
       ]).layer(130),
 
       // Optional, strictly verified cached music video
-      this.music_video_button = Group(1030, 930, 120, 80, [
-        this.music_video_background = Box(0, 0, 120, 80)
+      this.music_video_button = Group(935, 930, 110, 80, [
+        this.music_video_background = Box(0, 0, 110, 80)
           .fill(UIColor)
           .stroke(BtnBorder)
           .radius(8),
-        this.music_video_label = Txt(6, 0, 108, 80)
+        this.music_video_label = Txt(5, 0, 100, 80)
           .font(UIFont.size(12))
           .color(White)
           .align(CENTER)
@@ -383,9 +381,16 @@ export default class MenuScreen extends Screen {
       ]).layer(130),
 
       // Interface language action
-      this.language_button = Group(1160, 930, 120, 80, [
-        Box(0, 0, 120, 80).fill(UIColor).stroke(BtnBorder).radius(8),
-        this.language_label = Txt(6, 0, 108, 80).font(UIFont.size(12)).color(White).align(CENTER).noOverflow(),
+      this.language_button = Group(1053, 930, 110, 80, [
+        Box(0, 0, 110, 80).fill(UIColor).stroke(BtnBorder).radius(8),
+        this.language_label = Txt(5, 0, 100, 80).font(UIFont.size(12)).color(White).align(CENTER).noOverflow(),
+      ]).layer(130),
+
+      // Region selection, live source health, latency, and recent diagnostics.
+      this.network_button = Group(1171, 930, 110, 80, [
+        Box(0, 0, 110, 80).fill(UIColor).stroke(BtnBorder).radius(8),
+        this.network_label = Txt(5, 0, 100, 80)
+          .font(UIFont.size(12)).color(White).align(CENTER).noOverflow(),
       ]).layer(130),
 
       // Project credits, kept clear of the top-left volume controls.
@@ -617,6 +622,8 @@ export default class MenuScreen extends Screen {
         ]),
       ]).layer(310).hide(),
       this.libraryEditorDialog.group.layer(315),
+      this.playStyleDialog.group.layer(318),
+      this.networkStatusDialog.group.layer(320),
     ])
 
     this.empty = true
@@ -626,6 +633,21 @@ export default class MenuScreen extends Screen {
     this.song_list_item = []
     this.current_position = 0
 
+    for (const label of [
+      this.import_music_label,
+      this.editLibraryLabel,
+      this.reset_library_label,
+      this.key_effects_label,
+      this.play_style_label,
+      this.music_video_label,
+      this.language_label,
+      this.network_label,
+      this.about_label,
+      this.sort_label,
+    ]) {
+      label.el.style.textShadow =
+        '0 2px 4px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.72)'
+    }
     this.import_music_button.el.style.cursor = 'pointer'
     this.import_music_button.el.setAttribute('role', 'button')
     this.import_music_button.el.addEventListener('click', () => {
@@ -641,19 +663,15 @@ export default class MenuScreen extends Screen {
     this.reset_library_button.el.addEventListener('click', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd' }))
     })
-    this.metadata_refresh_button.el.style.cursor = 'pointer'
-    this.metadata_refresh_button.el.setAttribute('role', 'button')
-    this.metadata_refresh_button.el.addEventListener('click', () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'u' }))
-    })
     this.key_effects_button.el.style.cursor = 'pointer'
     this.key_effects_button.el.setAttribute('role', 'button')
     this.key_effects_button.el.addEventListener('click', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k' }))
     })
-    this.demo_mode_button.el.style.cursor = 'pointer'
-    this.demo_mode_button.el.setAttribute('role', 'button')
-    this.demo_mode_button.el.addEventListener('click', () => {
+    this.play_style_button.el.style.cursor = 'pointer'
+    this.play_style_button.el.setAttribute('role', 'button')
+    this.play_style_button.el.setAttribute('aria-haspopup', 'dialog')
+    this.play_style_button.el.addEventListener('click', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm' }))
     })
     this.music_video_button.el.style.cursor = 'pointer'
@@ -666,6 +684,11 @@ export default class MenuScreen extends Screen {
     this.language_button.el.addEventListener('click', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l' }))
     })
+    this.network_button.el.style.cursor = 'pointer'
+    this.network_button.el.setAttribute('role', 'button')
+    this.network_button.el.addEventListener('click', () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n' }))
+    })
     this.about_button.el.style.cursor = 'pointer'
     this.about_button.el.setAttribute('role', 'button')
     this.about_button.el.addEventListener('click', () => {
@@ -675,11 +698,6 @@ export default class MenuScreen extends Screen {
     this.sort_button.el.setAttribute('role', 'button')
     this.sort_button.el.addEventListener('click', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 's' }))
-    })
-    this.dedupe_button.el.style.cursor = 'pointer'
-    this.dedupe_button.el.setAttribute('role', 'button')
-    this.dedupe_button.el.addEventListener('click', () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g' }))
     })
     this.language_overlay.el.style.opacity = '0.72'
     this.language_overlay.el.style.cursor = 'pointer'
@@ -850,9 +868,6 @@ export default class MenuScreen extends Screen {
     const resetLabel = withKey(t('menu.resetLibrary'), 'D')
     this.reset_library_label.text(resetLabel)
     this.reset_library_button.el.setAttribute('aria-label', resetLabel)
-    const metadataLabel = withKey(t('menu.refreshMetadata'), 'U')
-    this.metadata_refresh_label.text(metadataLabel)
-    this.metadata_refresh_button.el.setAttribute('aria-label', metadataLabel)
     const keyEffectsLabel = t('menu.keyEffects', {
       state: t(
         this.key_effects_enabled ? 'common.enabled' : 'common.disabled',
@@ -865,18 +880,12 @@ export default class MenuScreen extends Screen {
       'aria-pressed',
       String(this.key_effects_enabled),
     )
-    const demoModeLabel = t('menu.demoMode', {
-      state: t(
-        this.demo_mode_enabled ? 'common.enabled' : 'common.disabled',
-      ),
+    const playStyleButtonLabel = t('menu.playStyleWithKey', {
+      mode: t(`playStyle.${this.play_style}`),
+      key: 'M',
     })
-    const demoModeButtonLabel = withKey(demoModeLabel, 'M')
-    this.demo_mode_label.text(demoModeButtonLabel)
-    this.demo_mode_button.el.setAttribute('aria-label', demoModeButtonLabel)
-    this.demo_mode_button.el.setAttribute(
-      'aria-pressed',
-      String(this.demo_mode_enabled),
-    )
+    this.play_style_label.text(playStyleButtonLabel)
+    this.play_style_button.el.setAttribute('aria-label', playStyleButtonLabel)
     const musicVideoLabel = t('menu.musicVideo', {
       state: t(
         this.music_video_enabled ? 'common.enabled' : 'common.disabled',
@@ -898,6 +907,9 @@ export default class MenuScreen extends Screen {
     const languageButtonLabel = withKey(languageLabel, 'L')
     this.language_label.text(languageButtonLabel)
     this.language_button.el.setAttribute('aria-label', languageButtonLabel)
+    const networkLabel = withKey(t('menu.network'), 'N')
+    this.network_label.text(networkLabel)
+    this.network_button.el.setAttribute('aria-label', networkLabel)
     const aboutLabel = withKey(t('menu.about'), 'A')
     this.about_label.text(aboutLabel)
     this.about_button.el.setAttribute('aria-label', aboutLabel)
@@ -965,9 +977,6 @@ export default class MenuScreen extends Screen {
     }
     this.sort_dialog_title.text(t('sort.selectTitle'))
     this.sort_dialog_hint.text(t('sort.selectHint'))
-    const dedupeLabel = withKey(t('menu.dedupe'), 'G')
-    this.dedupe_label.text(dedupeLabel)
-    this.dedupe_button.el.setAttribute('aria-label', dedupeLabel)
     this.sort_dialog.el.setAttribute('aria-label', t('sort.selectTitle'))
     this.setSortState(this.sort_mode, this.sort_direction)
     this.setSortDirection(this.sort_direction)
@@ -986,6 +995,8 @@ export default class MenuScreen extends Screen {
       t('library.reset.cancelAction'),
     )
     this.libraryEditorDialog.setLocale()
+    this.networkStatusDialog.setLocale()
+    this.playStyleDialog.setLocale()
     this.updateGameMode(this.current_mode)
   }
 
@@ -1089,12 +1100,60 @@ export default class MenuScreen extends Screen {
     this.libraryEditorDialog.hide()
   }
 
+  showNetworkStatus (status) {
+    this.dialogOpen = true
+    this.networkStatusDialog.show(status)
+  }
+
+  hideNetworkStatus () {
+    this.dialogOpen = false
+    this.networkStatusDialog.hide()
+  }
+
+  setNetworkStatus (status) {
+    this.networkStatusDialog.setStatus(status)
+  }
+
+  setNetworkCheckBusy (busy) {
+    this.networkStatusDialog.setBusy(busy)
+  }
+
+  getNetworkProxySettings () {
+    return this.networkStatusDialog.proxySettings()
+  }
+
+  toggleNetworkLogs () {
+    this.networkStatusDialog.toggleLogs()
+  }
+
+  showPlayStyleMenu (style) {
+    this.dialogOpen = true
+    this.playStyleDialog.show(style)
+  }
+
+  hidePlayStyleMenu () {
+    this.dialogOpen = false
+    this.playStyleDialog.hide()
+  }
+
+  setPlayStyleSelection (index) {
+    this.playStyleDialog.setSelection(index)
+  }
+
   setLibraryEditorCursor (index) {
     this.libraryEditorDialog.setCursor(index)
   }
 
   setLibraryEditorSelection (ids) {
     this.libraryEditorDialog.setSelectedIds(ids)
+  }
+
+  setLibraryEditorSongs (songs) {
+    this.libraryEditorDialog.updateSongs(songs)
+  }
+
+  setLibraryEditorSort (mode, direction) {
+    this.libraryEditorDialog.setSortState(mode, direction)
   }
 
   showLibraryDeleteConfirmation (count) {
@@ -1279,6 +1338,10 @@ export default class MenuScreen extends Screen {
           Txt(-40, 28, 30, 30).fill(Gray).radius(5),
         ])
       } else {
+        const pronunciationPending = c.source?.quality?.pronunciation_status === 'pending'
+        const artistPending = c.source?.artist_resolution?.status === 'pending' ||
+          c.completeness?.artistStatus === 'pending'
+        const pending = pronunciationPending || artistPending
         group = Group(0, position * 100, 620, 100, [
           Txt(0, 24, 440, 36).text(displaySongTitle(c, this.i18n.locale)).font(SongFont.size(36)).color(White).noOverflow(),
           Txt(0, 0, 440, 18).text(c.artist).font(SongFont.size(22)).color(White).noOverflow(),
@@ -1289,7 +1352,7 @@ export default class MenuScreen extends Screen {
             .align(CENTER)
             .noOverflow(),
           Txt(-40, 22, 30, 40)
-            .text('•')
+            .text(pending ? '*' : '•')
             .font(UIFont.size(24))
             .align(CENTER)
             .color(White),
@@ -1299,9 +1362,20 @@ export default class MenuScreen extends Screen {
       group.el.style.transition = 'transform 0.2s ease'
       group.el.style.cursor = 'pointer'
       group.el.setAttribute('role', 'button')
-      group.el.setAttribute('aria-label', c instanceof SongCollection
+      const pendingLabels = []
+      if (!(c instanceof SongCollection)) {
+        if (c.source?.quality?.pronunciation_status === 'pending') {
+          pendingLabels.push(this.i18n.t('menu.song.pendingPronunciation'))
+        }
+        if (c.source?.artist_resolution?.status === 'pending' ||
+          c.completeness?.artistStatus === 'pending') {
+          pendingLabels.push(this.i18n.t('menu.song.pendingArtist'))
+        }
+      }
+      group.el.setAttribute('aria-label', [c instanceof SongCollection
         ? displayCollectionName(c, this.i18n.locale)
-        : displaySongTitle(c, this.i18n.locale))
+        : displaySongTitle(c, this.i18n.locale), ...pendingLabels]
+        .filter(Boolean).join(' · '))
       const itemPosition = position
       group.el.addEventListener('click', () => {
         this.song_select_handler?.(itemPosition)
@@ -1330,27 +1404,24 @@ export default class MenuScreen extends Screen {
 
   updateGameMode(mode) {
     this.current_mode = mode
-    this.demo_mode_enabled = mode === 'auto'
-    this.demo_mode_background.el.style.backgroundColor =
-      this.demo_mode_enabled
+    this.play_style = mode === 'auto'
+      ? 'demo'
+      : mode === 'assist'
+        ? 'simple'
+        : 'normal'
+    this.play_style_background.el.style.backgroundColor =
+      mode === 'auto'
         ? 'rgba(118, 76, 180, 0.84)'
+        : mode === 'assist'
+          ? 'rgba(38, 121, 154, 0.82)'
         : 'rgba(70, 70, 70, 0.78)'
     this.game_mode_banner.text(mode === 'normal' ? '' : this.i18n.t(`menu.mode.${mode}`))
-    const demoModeLabel = this.i18n.t('menu.demoMode', {
-      state: this.i18n.t(
-        this.demo_mode_enabled ? 'common.enabled' : 'common.disabled',
-      ),
-    })
-    const buttonLabel = this.i18n.t('common.labelWithKey', {
-      label: demoModeLabel,
+    const buttonLabel = this.i18n.t('menu.playStyleWithKey', {
+      mode: this.i18n.t(`playStyle.${this.play_style}`),
       key: 'M',
     })
-    this.demo_mode_label.text(buttonLabel)
-    this.demo_mode_button.el.setAttribute(
-      'aria-pressed',
-      String(this.demo_mode_enabled),
-    )
-    this.demo_mode_button.el.setAttribute(
+    this.play_style_label.text(buttonLabel)
+    this.play_style_button.el.setAttribute(
       'aria-label',
       buttonLabel,
     )

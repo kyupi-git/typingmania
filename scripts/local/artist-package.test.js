@@ -7,6 +7,7 @@ import { test } from '@jest/globals'
 
 import PackedFile from '../../src/lib/packedfile.js'
 import { refreshPackedSongArtist } from './artist-package.js'
+import { ORIGINAL_ARTIST_VERSION } from './original-artist.js'
 
 globalThis.TextEncoder = TextEncoder
 globalThis.TextDecoder = TextDecoder
@@ -61,7 +62,7 @@ test('artist refresh changes metadata while preserving private media', async () 
       source: {
         checks: { artist_original: true },
         artist_resolution: {
-          version: 3,
+          version: ORIGINAL_ARTIST_VERSION,
           resolved: true,
           artists: [{
             singer_mid: '0027n73d00Pkeq',

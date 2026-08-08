@@ -10,7 +10,9 @@ export const Gray = Fill('#999')
 export const Gray2 = Fill('#A8A8A8')
 
 
-export const UIColor = Fill('#666').opacity('0.75')
+// Slightly more opaque than the artwork layer so controls stay legible on
+// both bright posters and dark provider backgrounds.
+export const UIColor = Fill('#666').opacity('0.82')
 export const BtnBorder = Stroke(1, 'white')
 
 export function format_number_comma (number) {

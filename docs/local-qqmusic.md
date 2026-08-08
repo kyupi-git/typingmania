@@ -38,8 +38,8 @@ Removed aliases and raw dirty titles are not retained. Catalog results are
 cached locally, preserve each song's own role and episode numbers, and are
 skipped after repeated network failures.
 
-The scan excludes `.git`, `node_modules`, `.agents`, `.codex`, and
-`QQMusicCache`.
+The scan skips version-control data, installed dependencies, tool state, and
+private music-client data directories.
 
 ## Add songs from QQ Music
 
@@ -69,7 +69,9 @@ The importer performs these checks in order:
 8. Preserve evidently native performer names locally. For a suspicious
    localized Japanese name, query QQ Music's domestic singer detail in a batch
    and select its single native primary name instead of a translated or alias
-   list. Leave the artist blank if the original cannot be verified.
+   list. If online proof is temporarily unavailable, retain a trustworthy
+   provider or embedded label as pending (white `*`) rather than presenting it
+   as verified; biography, copyright, unknown, or poisoned values stay blank.
 9. Remove timed title, performer, lyricist, composer, arranger, and producer
    rows before pairing lyrics with pronunciation. Reject instrumental/BGM,
    no-lyrics placeholders, and timelines without substantial distinct vocals.
@@ -122,7 +124,7 @@ Reconciliation is deterministic and requires no user choices:
    sufficiently similar to the official line.
 5. Recover a missing QRC display line only when both an unused official line
    and an unused local Roma line share the same timestamp. Pronunciation is
-   never invented from a dictionary or guessed from Kanji.
+   never presented as verified when supplied only by the bundled dictionary.
 6. Validate both directions of the complete text sequence at 99.5% coverage,
    validate every Roma syllable timeline, and choose the highest-scoring
    candidate.
@@ -131,12 +133,13 @@ Reconciliation is deterministic and requires no user choices:
    instrumental break from becoming typing time for the previous lyric.
 
 If confidence is insufficient, the candidate is discarded and the importer
-continues looking for another cached song. If the online service is temporarily
-unavailable, Japanese pronunciation is accepted offline only when the main QRC
-and `_qmRoma.qrc` share the same cache identity, the title matches exactly, the
-duration is within two seconds, the artist or soundtrack album agrees, and
-every playable line has complete Roma timing. Otherwise the song is skipped;
-the importer never substitutes a `latin-table` or dictionary guess. Validated
+continues looking for another cached song. When the online service is
+temporarily unavailable, the main QRC plus `_qmRoma.qrc` can establish offline
+verification only when they share the same cache identity, exact title,
+duration within two seconds, agreeing artist or soundtrack album, and complete
+Roma timing. Explicit ruby and complete Roma timing are verified first. If no
+reliable Roma evidence is available, complete bundled dictionary output may
+keep the song playable as pending, never as verified. Validated
 packages record separate text and pronunciation fingerprints, evidence
 versions, coverage, and repair counts in `song.json`.
 
@@ -197,11 +200,11 @@ original is retried after seven days.
 
 The display value is one native primary name, not QQ Music's translated label,
 romanized alias, pronunciation in parentheses, or a comma-separated alias
-list. If the original remains uncertain during a network outage, the displayed
-artist is blank. The raw label is retained for lyric and album matching and as
-provenance inside the private generated package/cache; it is never used as the
-displayed fallback. This makes loss of enrichment visible without silently
-presenting a translation as the original.
+list. If the original remains uncertain during a network outage, a trustworthy
+provider or embedded label may remain displayed with a white `*` pending marker;
+it is never presented as verified. Biography, copyright, unknown, and poisoned
+values remain blank. The raw label is retained for lyric and album matching and
+as provenance inside the private generated package/cache.
 
 ### Artwork selection and network fallback
 
@@ -241,16 +244,38 @@ continues with local data. Repeated required metadata or ekey failures stop the
 batch with a clear network message instead of hanging.
 
 Network lookup starts from a regional profile inferred from system locale/time
-zone or `TMN_NETWORK_REGION`, then reorders sources by live success, failure
+zone or `TMN_NETWORK_REGION`. A reliably identified mainland split system proxy
+uses direct device-region ordering for QQ Music, NetEase, KuGou, and Bilibili,
+while overseas services use the proxy's coarse exit-region ordering. Remote or
+explicit global proxies use the exit region globally; a manual proxy is always
+global. PAC and uncertain system-proxy classification remain unknown and PAC is
+not parsed; no public IP is retained. A non-blocking startup
+preflight then reorders 37 concrete endpoints by live success, failure
 cooldown, and latency. Mainland profiles start with QQ Music, NetEase, KuGou,
-and Bangumi; other profiles can prefer LRCLIB, iTunes Search, MusicBrainz,
+Bangumi, and Bilibili; other profiles can prefer LRCLIB, iTunes Search, MusicBrainz,
 TVmaze, TMDB, and Wikidata. Mainland China, Hong Kong/Macau, Taiwan, Japan,
 South Korea, Southeast Asia, the United States, Europe, and global profiles
-have separate safe starting orders. Bangumi's `bgm.tv`, `bangumi.tv`,
-`chii.in`, and API routes share one short budget. Exhausting optional routes hides an uncertain origin
-or poster instead of delaying or rejecting a playable local song. Official
+have separate safe starting orders. Bangumi's official API and three official
+website aliases are followed by
+health-ranked `bgmapi.anibt.net` and `api.bangumi.lol` API mirrors on failure;
+verified subject images also have mirrored routes. Website aliases remain a
+bounded fallback. NetEase and LRCLIB compatible endpoints are health-ranked
+individually. Mirror requests never include music-client sessions. Services
+without a trustworthy mirror fall back to independent catalogs, not unknown
+forwarding proxies.
+Exhausting optional routes hides an uncertain origin or poster instead of
+delaying or rejecting a playable local song. Official
 online lyric comparison is optional when stricter local QRC/Roma
 reconciliation already proves a complete match.
+
+The in-game **Network & source status** screen shows the effective profile,
+current route order, latency, and recent failures. A player can correct the
+region and use the Windows system proxy, a direct connection, or a manual
+HTTP/HTTPS proxy without changing the QQ Music client. Proxy credentials are
+kept in local private settings and never enter a song package or public log.
+Bilibili can provide a high-priority mainland official-video or MV lead and
+corroborate a known production, but cannot independently set the song title,
+artist, or original production title.
 
 ## Restoring the starter library
 

@@ -30,6 +30,8 @@ export default class Song {
     this.language = options.language
     this.cpm = options.cpm
     this.max_cpm = options.max_cpm
+    this.assist_cpm = options.assist_cpm
+    this.assist_max_cpm = options.assist_max_cpm
     this.duration = options.duration
     this.source = options.source || this.source || {}
     this.origin = options.origin || this.origin || null

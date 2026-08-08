@@ -17,24 +17,30 @@ to install Node.js or npm:
 | `@clamber_l/crypto` | 0.1.12 | MIT and Apache-2.0 | [npm](https://www.npmjs.com/package/@clamber_l/crypto) |
 | `music-metadata` | 11.14.0 | MIT | [GitHub](https://github.com/Borewit/music-metadata) |
 | `pinyin-pro` | 3.28.1 | MIT | [GitHub](https://github.com/zh-lx/pinyin-pro) |
+| `kuromoji` | 0.1.2 | Apache-2.0 | [GitHub](https://github.com/takuyaa/kuromoji.js) |
+| `undici` | 6.28.0 | MIT | [GitHub](https://github.com/nodejs/undici) |
 
 The pinned runtime graph also contains:
 
 | Package | Version | License |
 | --- | --- | --- |
 | `@borewit/text-codec` | 0.2.2 | MIT |
+| `async` | 2.6.4 | MIT |
 | `@tokenizer/inflate` | 0.4.1 | MIT |
 | `@tokenizer/token` | 0.3.0 | MIT |
 | `content-type` | 2.0.0 | MIT |
 | `debug` | 4.4.3 | MIT |
+| `doublearray` | 0.0.2 | MIT |
 | `file-type` | 21.3.4 | MIT |
 | `ieee754` | 1.2.1 | BSD-3-Clause |
+| `lodash` | 4.18.1 | MIT |
 | `media-typer` | 2.0.0 | MIT |
 | `ms` | 2.1.3 | MIT |
 | `strtok3` | 10.3.5 | MIT |
 | `token-types` | 6.1.2 | MIT |
 | `uint8array-extras` | 1.5.0 | MIT |
 | `win-guid` | 0.2.1 | MIT |
+| `zlibjs` | 0.3.1 | MIT |
 
 The complete Node.js license and bundled notices are reproduced at
 `tools/runtime/NODE-LICENSE.txt` and remain inside the official runtime
@@ -106,14 +112,19 @@ exact MusicBrainz release.
 
 AniSongDB and AnimeThemes can propose the anime production that directly uses
 a song. AniList and Bangumi cross-check the production identity, its
-original-language title, and poster. Bangumi's live-action catalog,
-TVmaze, and optionally TMDB can verify film, television, documentary, and
-variety productions. Wikidata and Wikimedia Commons provide a fail-closed
+original-language title, and poster. VNDB provides visual-novel records, while
+Steam can corroborate game and JRPG identities and artwork leads. Bangumi's
+cross-medium catalog, TVmaze, and optionally TMDB can verify film, television,
+documentary, and variety productions. Wikidata and Wikimedia Commons provide a fail-closed
 fallback for verified original titles and posters, including commercials and
-sports events. Bilibili, YouTube, and Niconico may provide optional MV
-candidates; downloaded media is accepted only by the application's identity
-and media checks. The
+sports events. Bilibili, YouTube, and Niconico may provide optional MV or
+official production-video leads; downloaded media is accepted only by the
+application's identity and media checks, and a media search result never acts
+as the sole authority for canonical song, artist, or production identity. The
 YouTube IFrame API is used only by compatible YouTube-backed song packages.
+When a system or manual proxy is active, Cloudflare trace, IP.SB, or ipapi may
+be used to determine only its coarse exit country/region for route ordering.
+TypingManiaNovel does not retain the public IP returned by such a service.
 These services and their data are not redistributed as open-source
 components:
 
@@ -129,6 +140,13 @@ components:
 - [AnimeThemes](https://animethemes.moe/)
 - [AniList](https://anilist.co/)
 - [Bangumi API](https://bangumi.github.io/api/)
+- [Bangumi API mirror at anibt.net](https://bgmapi.anibt.net/)
+- [Bangumi API mirror at bangumi.lol](https://api.bangumi.lol/)
+- [Cloudflare diagnostic endpoint](https://developers.cloudflare.com/fundamentals/reference/cdn-cgi-endpoint/)
+- [IP.SB API](https://ip.sb/api/)
+- [ipapi](https://ipapi.co/api/)
+- [VNDB API](https://api.vndb.org/kana)
+- [Steam Store](https://store.steampowered.com/)
 - [TVmaze API](https://www.tvmaze.com/api)
 - [TMDB API](https://developer.themoviedb.org/reference/search-movie)
 - [Wikidata API](https://www.wikidata.org/w/api.php)
@@ -147,6 +165,7 @@ release. Locally resolved records stay in the user's Git-ignored library. See
 TypingManiaNovel is not affiliated with, endorsed by, or sponsored by Tencent,
 Tencent Music Entertainment, QQ Music, NetEase, NetEase Cloud Music, Apple,
 Apple Music, KuGou Music, LRCLIB, AniSongDB, AnimeThemes, AniList, Bangumi,
-Wikidata, Wikimedia Commons, Bilibili, Niconico, Google, YouTube, Node.js,
+Wikidata, Wikimedia Commons, Bilibili, Niconico, Cloudflare, IP.SB, ipapi,
+Google, YouTube, Node.js,
 MusicBrainz, Cover Art Archive, TVmaze, TMDB, or the other projects named
 above.

@@ -5,8 +5,10 @@ import Score from '../game/score.js'
 import Typing from '../typing/typing.js'
 import {
   buildSongLyrics,
+  estimateAssistReferencePace,
   estimateReferencePace,
 } from './song-meta.js'
+import AssistPlayer, { createAssistLinePlan } from '../game/assist-player.js'
 
 test('song speed metadata predicts the deterministic demo average and 5s peak', () => {
   const lyrics = [
@@ -71,4 +73,44 @@ test('reference metadata equals a perfect run through the real score model', () 
   expect(result.missed).toBe(0)
   expect(result.averageCpm).toBe(averageCpm)
   expect(result.rollingPeakCpm).toBe(peakCpm)
+})
+
+test('Simple mode pace and score count only player-required initials', () => {
+  const csv = '0,8000,letters wake beneath the light'
+  const reference = estimateAssistReferencePace(csv, 'EN', {
+    durationMs: 10000,
+  })
+  const typing = new Typing(csv)
+  const plan = createAssistLinePlan(typing.lines[0], 'EN')
+  const requiredText = plan.gates.map(index => plan.keys[index]).join('')
+  const schedule = createDemoLineSchedule({
+    text: requiredText,
+    startTime: typing.lines[0].start_time,
+    endTime: typing.lines[0].end_time,
+    lineId: 0,
+  })
+  const score = new Score(reference.requiredKeys, { totalLines: 1 })
+  score.onLineStart(typing.lines[0].start_time)
+  let gateIndex = 0
+  const typer = {
+    updateTypingLine: () => {},
+    type: (key, options = {}) => {
+      const accepted = typing.getCurrentLine().accept(key)
+      if (options.recordScore !== false) {
+        score.onType(schedule.times[gateIndex++], accepted)
+      }
+      return accepted
+    },
+  }
+  const player = new AssistPlayer(typing, typer, { language: 'EN' })
+  for (const key of schedule.keys) player.type(key)
+  score.finish(10)
+
+  const result = score.getResultData(10)
+  expect(requiredText).toBe('lwbtl')
+  expect(result.correct).toBe(reference.requiredKeys)
+  expect(result.scoringChar).toBe(reference.requiredKeys)
+  expect(result.averageCpm).toBe(reference.averageCpm)
+  expect(result.rollingPeakCpm).toBe(reference.peakCpm)
+  expect(result.correct).toBeLessThan(typing.getScoringCharCount())
 })

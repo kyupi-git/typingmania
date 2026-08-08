@@ -103,6 +103,33 @@ test('accepted alternative romanization updates the falling key and plan', () =>
     .map(note => note.label)).toEqual(['H', 'I'])
 })
 
+test('automatically completed Simple-mode keys turn blue without growing streak', () => {
+  const container = document.createElement('div')
+  const effect = new KeyfallEffect(container)
+  effect.begin([{
+    id: 8,
+    text: 'ABC',
+    startTime: 1,
+    endTime: 3,
+  }])
+  const plan = effect.plans[0]
+  const playerNote = effect.feedback('a', true, {
+    lineId: 8,
+    remainingText: 'BC',
+    currentTime: 1,
+  })
+  const assistedNote = effect.feedback('b', true, {
+    lineId: 8,
+    remainingText: 'C',
+    currentTime: 1,
+    kind: 'assisted',
+  })
+  expect(playerNote.element.dataset.result).toBe('correct')
+  expect(assistedNote.element.dataset.result).toBe('assisted')
+  expect(assistedNote.streak).toBe(1)
+  expect(plan.notes[2].consumed).toBe(false)
+})
+
 test('automatic targets remain bounded and line misses land pink', () => {
   const container = document.createElement('div')
   const effect = new KeyfallEffect(container)

@@ -144,30 +144,13 @@ async function runGamdl ({
   ])
   const skipFile = path.join(staging, 'existing-track-ids.txt')
   await fs.writeFile(skipFile, [...skipTrackIds].join('\n'), 'utf8')
-  const template = '{title_id}'
-  const args = [
-    '-B',
+  const args = appleMusicGamdlArguments({
     runner,
-    '--no-config-file',
-    '--no-exceptions',
-    '--cookies-path', cookies,
-    '--language', appleMusicStorefrontLanguage(urls[0]),
-    '--output-path', output,
-    '--temp-path', temporary,
-    '--database-path', path.join(staging, 'downloads.sqlite3'),
-    '--synced-lyrics-format', 'lrc',
-    '--song-codec-priority', 'aac-web',
-    '--download-mode', 'ytdlp',
-    '--cover-format', 'jpg',
-    '--cover-size', '1200',
-    '--save-cover',
-    '--single-disc-file-template', template,
-    '--multi-disc-file-template', template,
-    '--no-album-file-template', template,
-    '--playlist-file-template', template,
-    '--truncate', '120',
-    ...urls,
-  ]
+    urls,
+    cookies,
+    staging,
+    output,
+  })
   try {
     await execFile(python, args, {
       windowsHide: true,
@@ -206,6 +189,40 @@ async function runGamdl ({
   return output
 }
 
+export function appleMusicGamdlArguments ({
+  runner,
+  urls,
+  cookies,
+  staging,
+  output = path.join(staging, 'output'),
+}) {
+  const temporary = path.join(staging, 'temporary')
+  const template = '{title_id}'
+  return [
+    '-B',
+    runner,
+    '--no-config-file',
+    '--no-exceptions',
+    '--cookies-path', cookies,
+    '--language', appleMusicStorefrontLanguage(urls[0]),
+    '--output-path', output,
+    '--temp-path', temporary,
+    '--database-path', path.join(staging, 'downloads.sqlite3'),
+    '--synced-lyrics-format', 'lrc',
+    '--song-codec-priority', 'aac-web',
+    '--download-mode', 'ytdlp',
+    '--cover-format', 'jpg',
+    '--cover-size', '1200',
+    '--save-cover',
+    '--single-disc-file-template', template,
+    '--multi-disc-file-template', template,
+    '--no-album-file-template', template,
+    '--playlist-file-template', template,
+    '--truncate', '120',
+    ...urls,
+  ]
+}
+
 async function collectFiles (directory, output = []) {
   const entries = await fs.readdir(directory, { withFileTypes: true })
   for (const entry of entries) {
@@ -214,6 +231,23 @@ async function collectFiles (directory, output = []) {
     else if (entry.isFile()) output.push(filename)
   }
   return output
+}
+
+export async function discoverAppleMusicOutput (directory) {
+  const files = await collectFiles(directory)
+  const mediaFiles = files.filter(filename => (
+    AUDIO_EXTENSIONS.has(path.extname(filename).toLocaleLowerCase())
+  ))
+  return mediaFiles.map(filename => ({
+    media: filename,
+    lyrics: files.find(candidate => (
+      path.dirname(candidate).toLocaleLowerCase() ===
+        path.dirname(filename).toLocaleLowerCase() &&
+      path.extname(candidate).toLocaleLowerCase() === '.lrc' &&
+      path.basename(candidate, path.extname(candidate)) ===
+        path.basename(filename, path.extname(filename))
+    )) || '',
+  }))
 }
 
 async function findCompanionLyrics (audioFilename, allFiles) {
@@ -306,9 +340,8 @@ export async function importAppleMusicSongs ({
       signal,
     })
     const files = await collectFiles(output)
-    const mediaFiles = files.filter(filename => (
-      AUDIO_EXTENSIONS.has(path.extname(filename).toLocaleLowerCase())
-    ))
+    const discovered = await discoverAppleMusicOutput(output)
+    const mediaFiles = discovered.map(value => value.media)
     if (!mediaFiles.length) {
       throw new AppleMusicImportError(
         'APPLE_MUSIC_NO_USABLE_TRACKS',
@@ -330,6 +363,7 @@ export async function importAppleMusicSongs ({
         const audioInfo = await inspectImportedAudio(audio, filename)
         metadata = metadataFromAppleAudio(audioInfo)
         const independentCatalog = await resolveImportedCatalogMatch({
+          root,
           metadata,
           provider: 'apple-music',
         }).catch(() => null)
@@ -376,7 +410,7 @@ export async function importAppleMusicSongs ({
           }
         }
         metadata = retainVerifiableArtistNames(metadata)
-        const lyrics = convertTimedLyrics({
+        const lyrics = await convertTimedLyrics({
           mainLines,
           readingLines,
           metadata,

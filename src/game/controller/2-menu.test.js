@@ -1,7 +1,13 @@
 import { jest, test } from '@jest/globals'
 
 import { POINTER_APPLY_CODE } from '../menu-navigation.js'
-import MenuController from './2-menu.js'
+import { NETWORK_PROXY_APPLY_CODE } from '../../screen/network-status-dialog.js'
+import {
+  LIBRARY_EDITOR_DEDUPE_CODE,
+  LIBRARY_EDITOR_REFRESH_CODE,
+  LIBRARY_EDITOR_SORT_PREFIX,
+} from '../../screen/library-editor-dialog.js'
+import MenuController, { sortEditableSongs } from './2-menu.js'
 
 function makeGame (actions) {
   const menuScreen = new Proxy({}, {
@@ -81,6 +87,97 @@ test('the sort direction remains an independent toggle', async () => {
 
   expect(game.menu_screen.setSortDirection).toHaveBeenCalledWith('desc')
   expect(game.preferences.setSongSort).toHaveBeenCalledWith('added', 'desc')
+})
+
+test('completeness sorting prioritizes core fields then directory and title', () => {
+  const completeExcept = (missing, directory, title) => ({
+    id: `${directory}/${title}`,
+    directory,
+    title,
+    completeness: {
+      score: 5,
+      pronunciation: missing !== 'pronunciation',
+      lyrics: missing !== 'lyrics',
+      identity: missing !== 'identity',
+      origin: missing !== 'origin',
+      album: missing !== 'album',
+      poster: missing !== 'poster',
+    },
+  })
+  const songs = [
+    completeExcept('pronunciation', 'A', 'Reading missing'),
+    completeExcept('poster', 'B', 'Poster missing'),
+    completeExcept('album', 'A', 'Cover missing'),
+    completeExcept('poster', 'A', 'Zulu'),
+    completeExcept('poster', 'A', 'Alpha'),
+  ]
+
+  expect(sortEditableSongs(songs, 'completeness', 'desc').map(song => song.title))
+    .toEqual([
+      'Alpha',
+      'Zulu',
+      'Poster missing',
+      'Cover missing',
+      'Reading missing',
+    ])
+})
+
+test('song-editor sorting returns the viewport to the first row', async () => {
+  const game = makeGame([
+    { key: 'ArrowDown', code: 'ArrowDown' },
+    { key: `${LIBRARY_EDITOR_SORT_PREFIX}source`, code: 'LibraryEditorSort' },
+    { key: 'Escape', code: 'Escape' },
+  ])
+  const controller = new MenuController(game)
+  await controller.editLibrary({
+    providedSongs: [
+      { id: 'b', title: 'B', source: 'netease' },
+      { id: 'a', title: 'A', source: 'qqmusic' },
+    ],
+    providedSession: { local: { token: 'token' }, headers: {} },
+  })
+  expect(game.menu_screen.setLibraryEditorCursor.mock.calls.at(-1)[0])
+    .toBe(0)
+})
+
+test('duplicate review opens from inside the song editor', async () => {
+  const game = makeGame([{
+    key: 'Duplicates',
+    code: LIBRARY_EDITOR_DEDUPE_CODE,
+  }])
+  const controller = new MenuController(game)
+  controller.deduplicateLibrary = jest.fn(async () => {})
+  const session = { local: { token: 'token' }, headers: {} }
+  await controller.editLibrary({ providedSongs: [], providedSession: session })
+  expect(controller.deduplicateLibrary).toHaveBeenCalledWith({
+    providedSession: session,
+  })
+})
+
+test('metadata refresh opens from inside song information and editing', async () => {
+  const game = makeGame([{
+    key: 'Refresh',
+    code: LIBRARY_EDITOR_REFRESH_CODE,
+  }])
+  const controller = new MenuController(game)
+  controller.refreshLibraryMetadata = jest.fn(async () => {})
+  await controller.editLibrary({
+    providedSongs: [],
+    providedSession: { local: { token: 'token' }, headers: {} },
+  })
+  expect(game.menu_screen.hideLibraryEditor).toHaveBeenCalled()
+  expect(controller.refreshLibraryMetadata).toHaveBeenCalledTimes(1)
+})
+
+test('the song information refresh shortcut works inside the editor', async () => {
+  const game = makeGame([{ key: 'u', code: 'KeyU' }])
+  const controller = new MenuController(game)
+  controller.refreshLibraryMetadata = jest.fn(async () => {})
+  await controller.editLibrary({
+    providedSongs: [],
+    providedSession: { local: { token: 'token' }, headers: {} },
+  })
+  expect(controller.refreshLibraryMetadata).toHaveBeenCalledTimes(1)
 })
 
 test('the import source menu launches each implemented provider', async () => {
@@ -188,6 +285,49 @@ test('about dialog closes with Backspace', async () => {
   expect(game.menu_screen.showAbout).toHaveBeenCalled()
   expect(game.menu_screen.hideAbout).toHaveBeenCalled()
   expect(game.sfx.play).toHaveBeenCalledWith('exit')
+})
+
+test('network proxy changes are applied through the authenticated local API', async () => {
+  const game = makeGame([
+    { key: 'Enter', code: NETWORK_PROXY_APPLY_CODE },
+    { key: 'Escape', code: 'Escape' },
+  ])
+  game.menu_screen.getNetworkProxySettings.mockReturnValue({
+    mode: 'manual',
+    manualProxy: 'http://127.0.0.1:7890',
+  })
+  const responses = [
+    { ok: true, json: async () => ({ token: 'test-token' }) },
+    {
+      ok: true,
+      json: async () => ({ proxyMode: 'system', sources: [] }),
+    },
+    {
+      ok: true,
+      json: async () => ({ proxyMode: 'manual', sources: [] }),
+    },
+  ]
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = jest.fn(async () => responses.shift())
+  try {
+    const controller = new MenuController(game)
+    await controller.showNetworkStatus()
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/network/proxy',
+      expect.objectContaining({
+        method: 'PUT',
+        headers: expect.objectContaining({ 'X-TMN-Token': 'test-token' }),
+        body: JSON.stringify({
+          mode: 'manual',
+          manualProxy: 'http://127.0.0.1:7890',
+        }),
+      }),
+    )
+    expect(game.menu_screen.setNetworkStatus)
+      .toHaveBeenCalledWith(expect.objectContaining({ proxyMode: 'manual' }))
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('Escape cancels metadata refresh even while the local session is opening', async () => {

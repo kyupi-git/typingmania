@@ -6,10 +6,129 @@ import {
   longestCommonSubsequenceLength,
   normalizeLyricComparable,
   normalizeReading,
+  normalizeExplicitPronunciation,
   reconcileQrcWithOfficial,
   stripInlineLyricRuby,
   timedLyricsAgreement,
+  LYRIC_QUALITY_VERSION,
 } from './lyrics-quality.js'
+
+test('lyric quality version is bumped for structural metadata filtering', () => {
+  expect(LYRIC_QUALITY_VERSION).toBe(14)
+})
+
+test('copyright and unauthorized-use notices are removed across languages', () => {
+  const result = filterLyricLines([
+    { start: 0, text: '未经著作权人许可不得翻唱翻录或使用' },
+    { start: 500, text: '本作品未经许可，不得翻唱、翻录或以其他方式使用' },
+    { start: 1000, text: '未經著作權人許可，不得翻唱、翻錄或以其他方式使用' },
+    { start: 1500, text: 'Copyright © 2026 All rights reserved' },
+    { start: 2000, text: 'Unauthorized reproduction and distribution prohibited.' },
+    { start: 2500, text: '無断転載禁止' },
+    { start: 3000, text: '著作権者の許諾なく複製・配信禁止' },
+    { start: 3500, text: '未经许可的爱不能停止' },
+    { start: 4000, text: 'You are the right one for me' },
+    { start: 4500, text: '配信の夜に君と歌う' },
+  ])
+  expect(result.removed.map(line => line.text)).toEqual([
+    '未经著作权人许可不得翻唱翻录或使用',
+    '本作品未经许可，不得翻唱、翻录或以其他方式使用',
+    '未經著作權人許可，不得翻唱、翻錄或以其他方式使用',
+    'Copyright © 2026 All rights reserved',
+    'Unauthorized reproduction and distribution prohibited.',
+    '無断転載禁止',
+    '著作権者の許諾なく複製・配信禁止',
+  ])
+  expect(result.kept.map(line => line.text)).toEqual([
+    '未经许可的爱不能停止',
+    'You are the right one for me',
+    '配信の夜に君と歌う',
+  ])
+})
+
+test('explicit pronunciation separators are normalized without changing display text', () => {
+  expect(normalizeExplicitPronunciation('<<心 的 歌>>[ko ko no uta]'))
+    .toBe('<<心 的 歌>>[kokonouta]')
+  expect(normalizeExplicitPronunciation('<<心 的 歌>>[ko’ko‘no\u0027uta]'))
+    .toBe('<<心 的 歌>>[kokonouta]')
+  expect(normalizeExplicitPronunciation('<<歌>>[huxannki-(emi)...]', 'JP'))
+    .toBe('<<歌>>[huxannkiemi]')
+  expect(normalizeExplicitPronunciation('<<歌>>[2ninn]', 'JP'))
+    .toBe('<<歌>>[futari]')
+  expect(normalizeExplicitPronunciation('visible lyric')).toBe('visible lyric')
+  expect(() => normalizeExplicitPronunciation('<<歌>>[こえ]')).toThrow(/unsupported/iu)
+  expect(() => normalizeExplicitPronunciation('<<歌>>[ko-ko2]')).toThrow(/unsupported/iu)
+})
+
+test('Chinese, English and Japanese credit/speaker blocks are removed', () => {
+  const result = filterLyricLines([
+    { start: 0, text: '和声编写/和声：陈真' },
+    { start: 500, text: '人声编辑：蔡志成' },
+    { start: 1000, text: '混音工程师：Aki' },
+    { start: 1500, text: '音楽総監督：山田' },
+    { start: 2000, text: 'PGM：Studio' },
+    { start: 2500, text: '张远：' },
+    { start: 3000, text: '歌手/观众：' },
+    { start: 9000, text: '心：你听见了吗' },
+  ], { artistNames: ['张远'] })
+  expect(result.removed.map(line => line.text)).toEqual([
+    '和声编写/和声：陈真', '人声编辑：蔡志成', '混音工程师：Aki',
+    '音楽総監督：山田', 'PGM：Studio', '张远：', '歌手/观众：',
+  ])
+  expect(result.kept.map(line => line.text)).toEqual(['心：你听见了吗'])
+})
+
+test('music coordination credits are removed across script variants', () => {
+  const result = filterLyricLines([
+    { start: 0, text: '音乐统筹：许夙 @ELEVENZ' },
+    { start: 1000, text: '音樂統籌：許夙' },
+    { start: 2000, text: '音楽統括：山田' },
+    { start: 3000, text: 'We sing beneath the open sky' },
+  ], {})
+  expect(result.removed.map(line => line.text)).toEqual([
+    '音乐统筹：许夙 @ELEVENZ', '音樂統籌：許夙', '音楽統括：山田',
+  ])
+  expect(result.kept.map(line => line.text)).toEqual([
+    'We sing beneath the open sky',
+  ])
+})
+
+test('recording edition title headers are removed only at the beginning', () => {
+  const result = filterLyricLines([
+    { start: 0, text: '那一天' },
+    { start: 16000, text: '那一天' },
+    { start: 18000, text: '我们终于再见' },
+  ], { title: '那一天（女声版）' })
+  expect(result.removed).toEqual([{ start: 0, text: '那一天', kind: 'header' }])
+  expect(result.kept.map(line => line.text)).toEqual(['那一天', '我们终于再见'])
+})
+
+test('empty multilingual speaker labels are removed while natural colons remain', () => {
+  const result = filterLyricLines([
+    { start: 7000, text: 'Pakway：' },
+    { start: 9000, text: 'Alaric的窗台：' },
+    { start: 10000, text: '合：' },
+    { start: 10500, text: 'All:' },
+    { start: 11000, text: '心：你还好吗' },
+  ], {})
+  expect(result.removed.map(line => line.text)).toEqual([
+    'Pakway：', 'Alaric的窗台：', '合：', 'All:',
+  ])
+  expect(result.kept.map(line => line.text)).toEqual(['心：你还好吗'])
+})
+
+test('speaker-shaped lines with正文 are retained even for verified names', () => {
+  const result = filterLyricLines([
+    { start: 7000, text: '张三/李四：我们一起唱' },
+    { start: 8000, text: 'All: everybody sing along' },
+    { start: 9000, text: '张远：我们一起唱' },
+  ], { artistNames: ['张远'] })
+  expect(result.kept.map(line => line.text)).toEqual([
+    '张三/李四：我们一起唱', 'All: everybody sing along',
+    '张远：我们一起唱',
+  ])
+  expect(result.removed).toEqual([])
+})
 
 test('instrumental titles and provider no-lyrics placeholders are rejected', () => {
   expect(isNonVocalTrackMetadata({ title: 'Sample Song (Instrumental)' })).toBe(true)

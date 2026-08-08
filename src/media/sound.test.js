@@ -26,6 +26,40 @@ test('sound initialization waits for a delayed AudioContext resume', async () =>
   await expect(initialization).resolves.toBeUndefined()
 })
 
+test('sound constructor defaults master volume to 100 percent', () => {
+  const originalAudioContext = window.AudioContext
+  const originalWebkitAudioContext = window.webkitAudioContext
+  const gain = {
+    gain: {
+      exponentialRampToValueAtTime: jest.fn(),
+      linearRampToValueAtTime: jest.fn(),
+    },
+    connect: jest.fn(),
+  }
+  const context = {
+    state: 'running',
+    currentTime: 0,
+    destination: {},
+    createGain: () => gain,
+    createDynamicsCompressor: () => ({ connect: jest.fn() }),
+    createAnalyser: () => ({
+      fftSize: 0,
+      connect: jest.fn(),
+    }),
+  }
+  window.AudioContext = jest.fn(() => context)
+  window.webkitAudioContext = undefined
+  try {
+    const sound = new Sound()
+    expect(sound.sound_value).toBe(100)
+    expect(gain.gain.exponentialRampToValueAtTime)
+      .toHaveBeenCalledWith(1, 0.1)
+  } finally {
+    window.AudioContext = originalAudioContext
+    window.webkitAudioContext = originalWebkitAudioContext
+  }
+})
+
 test('an already running AudioContext does not resume again', async () => {
   const context = {
     state: 'running',

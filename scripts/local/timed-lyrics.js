@@ -13,6 +13,7 @@ import {
   stripInlineLyricRuby,
 } from './lyrics-quality.js'
 import {
+  assertOriginalLyricLayer,
   lyricLanguage,
   normalizePronunciation,
   PRONUNCIATION_QUALITY_VERSION,
@@ -220,7 +221,7 @@ export function alignTrackSpecificReadings ({
   })
 }
 
-export function convertTimedLyrics ({
+export async function convertTimedLyrics ({
   mainLines,
   readingLines = [],
   metadata = {},
@@ -230,6 +231,7 @@ export function convertTimedLyrics ({
     throw new Error('Instrumental or background-music tracks are not playable')
   }
   const mainFilter = filterLyricLines(mainLines, metadata)
+  assertOriginalLyricLayer(metadata, mainFilter.kept)
   const readingFilter = filterLyricLines(
     readingLines,
     metadata,
@@ -243,6 +245,10 @@ export function convertTimedLyrics ({
   let generatedPinyinLines = 0
   let songSpecificPronunciationLines = 0
   let pronunciationOverrideLines = 0
+  let explicitRubyLines = 0
+  let dictionaryPronunciationLines = 0
+  let pendingPronunciationLines = 0
+  let verifiedPronunciationLines = 0
 
   for (const pair of pairs) {
     const { main } = pair
@@ -272,11 +278,17 @@ export function convertTimedLyrics ({
       providedReading = conventionalReading(visibleText, main.start, main.end)
       source = 'visible-kana'
     }
-    const pronunciation = pronunciationForLine({
-      text: visibleText,
+    const pronunciation = await pronunciationForLine({
+      text: main.text,
       providedReading,
       language: metadata.language,
     })
+    if (pronunciation.family === 'ja') {
+      if (pronunciation.explicitRuby) explicitRubyLines++
+      if (pronunciation.source === 'dictionary') dictionaryPronunciationLines++
+      if (pronunciation.status === 'pending') pendingPronunciationLines++
+      if (pronunciation.status === 'verified') verifiedPronunciationLines++
+    }
     let lyric = `<<${base}>>[]`
     let canType = false
 
@@ -379,6 +391,11 @@ export function convertTimedLyrics ({
       generatedPinyinLines,
       songSpecificPronunciationLines,
       pronunciationOverrideLines,
+      pronunciationStatus: pendingPronunciationLines > 0 ? (explicitRubyLines > 0 ? 'ruby-assisted' : 'pending') : (explicitRubyLines > 0 ? 'ruby-assisted' : 'verified'),
+      explicitRubyLines,
+      dictionaryPronunciationLines,
+      pendingPronunciationLines,
+      verifiedPronunciationLines,
       timingWindowsAdjusted: timing.adjusted,
       instrumentalGapMsRemoved: timing.removedGapMs,
       typicalMsPerKey: timing.typicalMsPerKey,

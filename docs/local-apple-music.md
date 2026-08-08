@@ -53,7 +53,8 @@ television, documentary, commercial, variety, and sports productions. An
 unavailable route is skipped quickly and leaves the optional origin blank,
 without blocking an otherwise playable track.
 
-Apple packages also participate in **Refresh info**. Their embedded Apple
+Apple packages also participate in **Refresh song info** inside **Song info &
+editing**. Their embedded Apple
 album cover is retained; iTunes Search is used only for metadata
 cross-checking, not as an artwork redistribution path. Only independently
 verified identity fields, a strictly matched direct-production title, and an
@@ -63,15 +64,16 @@ artwork is never overwritten.
 English letters and Chinese pinyin are handled locally. Apple synchronized LRC
 does not consistently expose Japanese creative readings, so a track containing
 Kanji is matched by title, artist, album, and duration against NetEase's public
-track record and accepts only its timed `romalrc`. If the exact reading cannot
-be proved, the song is skipped rather than assigned a generic Kanji reading.
+track record and prefers its timed `romalrc` or explicit ruby. If no trusted
+online reading can be proved, bundled dictionary output may fill playable gaps
+and the song remains pending rather than presented as verified.
 
 ## Local components
 
 The complete helper runtime is stored under `tools/importers/apple-music/`.
 Players do not need Python, pip, Node.js, npm, a wrapper service, or a runtime
-package download. `scripts/vendor-import-tools.ps1` is a maintainer-only,
-version-pinned reproduction script; normal play never invokes it.
+package download. The Windows release includes the validated helper runtime,
+so normal play never downloads or installs these components.
 
 The stable AAC-web route avoids the wrapper and API limitations that affect
 current non-web codec paths such as ALAC and Dolby Atmos. Python 3.13 is pinned

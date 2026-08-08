@@ -16,6 +16,7 @@ import {
 import { retainVerifiableArtistNames } from './imported-artist.js'
 import {
   enrichImportedSong,
+  findQQMusicTrackCandidates,
   matchQQMusicTrack,
 } from './imported-song-enrichment.js'
 import { rebuildSongIndex, scanSongLibrary, songsAreEquivalent } from './library.js'
@@ -41,7 +42,11 @@ import {
   tryNetworkSources,
 } from './network-source-planner.js'
 import { fetchCoverArtArchive } from './musicbrainz-api.js'
-import { lyricLanguage } from './pronunciation.js'
+import {
+  assertOriginalLyricLayer,
+  expectedLyricLanguage,
+  lyricLanguage,
+} from './pronunciation.js'
 import { timedLyricsAgreement } from './lyrics-quality.js'
 import {
   alignTrackSpecificReadings,
@@ -83,18 +88,33 @@ function artistNames (common) {
     .filter(Boolean)
 }
 
+function filenameIdentity (filename) {
+  const stem = path.basename(filename, path.extname(filename))
+    .replace(/^\d+\s*[-._]\s*/u, '')
+    .trim()
+  const match = stem.match(/^(.+?)\s+-\s+(.+)$/u)
+  if (!match) return { title: stem, artists: [] }
+  return {
+    title: match[2].trim(),
+    artists: match[1]
+      .split(/\s*[,;/、]\s*/u)
+      .map(value => value.trim())
+      .filter(Boolean),
+  }
+}
+
 function metadataFromAudio (audioInfo, filename) {
   const common = audioInfo.parsed.common || {}
+  const fromFilename = filenameIdentity(filename)
   const artists = artistNames(common)
-  const fallbackTitle = path.basename(filename, path.extname(filename))
-    .replace(/^\d+\s*[-._]\s*/u, '')
-  const title = String(common.title || fallbackTitle).trim()
+  const verifiedArtists = artists.length ? artists : fromFilename.artists
+  const title = String(common.title || fromFilename.title).trim()
   return {
     title,
     rawTitle: title,
     subtitle: '',
-    artist: artists.join(' / '),
-    artistNames: artists,
+    artist: verifiedArtists.join(' / '),
+    artistNames: verifiedArtists,
     album: String(common.album || '').trim(),
     albumId: '',
     albumPic: '',
@@ -160,11 +180,15 @@ async function companionCover (audioFilename, files) {
 }
 
 function detectLyricLanguage (metadata, mainLines) {
-  const family = lyricLanguage('U', mainLines.map(line => line.text).join('\n'))
-  metadata.language = ({ zh: 'ZH', ja: 'JP', en: 'EN' })[family]
+  if (!/^(?:U|)$/u.test(String(metadata.language || '').toLocaleUpperCase())) {
+    return
+  }
+  const text = mainLines.map(line => line.text).join('\n')
+  const family = expectedLyricLanguage(metadata, text) || lyricLanguage('U', text)
+  metadata.language = ({ zh: 'ZH', ja: 'JP', en: 'EN' })[family] || 'U'
 }
 
-function convertTextResource ({ metadata, localLrc, resource, service }) {
+async function convertTextResource ({ metadata, localLrc, resource, service }) {
   const durationMs = metadata.duration * 1000
   const localLines = localLrc
     ? parseLrc(localLrc, { durationMs })
@@ -177,6 +201,7 @@ function convertTextResource ({ metadata, localLrc, resource, service }) {
     )
     const mainLines = useLocal ? localLines : providerMain
     if (!mainLines.length) throw new Error('Timed LRC lyrics could not be matched')
+    assertOriginalLyricLayer(metadata, mainLines)
     detectLyricLanguage(metadata, mainLines)
     const readingLines = useLocal && resource.readingLines.length
       ? alignTrackSpecificReadings({
@@ -185,7 +210,7 @@ function convertTextResource ({ metadata, localLrc, resource, service }) {
           sourceReadings: resource.readingLines,
         })
       : resource.readingLines
-    return convertTimedLyrics({
+    return await convertTimedLyrics({
       mainLines,
       readingLines,
       metadata,
@@ -202,6 +227,7 @@ function convertTextResource ({ metadata, localLrc, resource, service }) {
   )
   const mainLines = useLocal ? localLines : providerMain
   if (!mainLines.length) throw new Error('Timed LRC lyrics could not be matched')
+  assertOriginalLyricLayer(metadata, mainLines)
   detectLyricLanguage(metadata, mainLines)
   const providerReadings = resource?.readingLines || parseLrc(
     resource?.romanized || '',
@@ -214,12 +240,54 @@ function convertTextResource ({ metadata, localLrc, resource, service }) {
         sourceReadings: providerReadings,
       })
     : providerReadings
-  return convertTimedLyrics({
+  return await convertTimedLyrics({
     mainLines,
     readingLines,
     metadata,
     readingSource: `${service}-timed-reading`,
   })
+}
+
+async function resolveQQMusicLyricResource ({
+  metadata,
+  songMid = '',
+  songId = '',
+  cookie = '',
+}) {
+  const candidates = []
+  const seen = new Set()
+  const add = candidate => {
+    const mid = String(candidate?.songMid || '')
+    if (!mid || seen.has(mid)) return
+    seen.add(mid)
+    candidates.push({
+      songMid: mid,
+      songId: String(candidate?.songId || ''),
+    })
+  }
+  add({ songMid, songId })
+  for (const candidate of await findQQMusicTrackCandidates(metadata, {
+    qqCookie: cookie,
+  }).catch(() => [])) add(candidate)
+
+  let mainFallback = null
+  let lastError = null
+  for (const candidate of candidates.slice(0, 5)) {
+    try {
+      const resource = await fetchBestQQMusicLyrics({
+        songMid: candidate.songMid,
+        songId: candidate.songId,
+        cookie,
+        metadata,
+      })
+      if (!mainFallback && resource.checked) mainFallback = resource
+      if (resource.checked && resource.readingChecked) return resource
+    } catch (error) {
+      lastError = error
+    }
+  }
+  if (mainFallback) return mainFallback
+  throw lastError || new Error('QQ Music timed lyrics are unavailable')
 }
 
 export async function resolveImportedLyrics ({
@@ -272,11 +340,11 @@ export async function resolveImportedLyrics ({
         numericSongId = detail?.songId || ''
       }
       if (!songId) return null
-      const resource = await fetchBestQQMusicLyrics({
+      const resource = await resolveQQMusicLyricResource({
+        metadata,
         songMid: songId,
         songId: numericSongId,
         cookie,
-        metadata,
       })
       return {
         lyrics: convertTextResource({
@@ -370,10 +438,11 @@ export async function resolveImportedLyrics ({
   try {
     // A valid local sidecar is a safe fallback, but it must not prevent an
     // online source from detecting that the file belongs to another song.
-    // Bound validation to the two best live/regional routes so an offline
-    // import does not wait through every unavailable service.
+    // A local sidecar can be a translated layer and the first provider can
+    // have main lyrics without pronunciation. Try every bounded, region-
+    // ranked lyric route before accepting the offline fallback.
     const candidates = offlineResolution
-      ? rankedNetworkSources(sources).slice(0, 2)
+      ? rankedNetworkSources(sources).slice(0, 4)
       : sources
     const resolved = await tryNetworkSources(candidates)
     if (resolved?.value) return resolved.value
@@ -444,6 +513,7 @@ export async function importMediaDirectorySongs ({
         throw new Error('Title and artist tags are required for safe lyric matching')
       }
       const matched = await resolveImportedCatalogMatch({
+        root,
         metadata,
         provider,
         qqCookie,
@@ -471,6 +541,12 @@ export async function importMediaDirectorySongs ({
         matched,
         qqCookie,
       })
+      const resolvedLanguage = lyricResolution.lyrics.language
+      if ((!metadata.language || metadata.language === 'U') && resolvedLanguage) {
+        metadata.language = resolvedLanguage.toLocaleUpperCase() === 'JA'
+          ? 'JP'
+          : resolvedLanguage.toLocaleUpperCase()
+      }
       metadata = retainVerifiableArtistNames(metadata)
 
       stage = 'cover'

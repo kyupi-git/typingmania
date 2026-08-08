@@ -104,22 +104,41 @@ function privatePathReason (filename) {
 }
 
 async function candidateFiles () {
-  const { stdout } = await execFile(
-    'git',
-    [
-      'ls-files',
-      '--cached',
-      '--others',
-      '--exclude-standard',
-      '-z',
-    ],
-    {
-      cwd: ROOT,
-      encoding: 'buffer',
-      maxBuffer: 16 * 1024 * 1024,
-    },
-  )
-  return stdout.toString('utf8').split('\0').filter(Boolean)
+  try {
+    const { stdout } = await execFile(
+      'git',
+      [
+        'ls-files',
+        '--cached',
+        '--others',
+        '--exclude-standard',
+        '-z',
+      ],
+      {
+        cwd: ROOT,
+        encoding: 'buffer',
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    )
+    const files = stdout.toString('utf8').split('\0').filter(Boolean)
+    if (files.length) return files
+  } catch {}
+
+  // Release archives intentionally contain no .git directory. Walk the
+  // extracted tree so a clean-package audit cannot silently pass zero files.
+  const files = []
+  const visit = async directory => {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      if (entry.name === '.git') continue
+      const filename = path.join(directory, entry.name)
+      if (entry.isDirectory()) await visit(filename)
+      else if (entry.isFile()) {
+        files.push(path.relative(ROOT, filename).split(path.sep).join('/'))
+      }
+    }
+  }
+  await visit(ROOT)
+  return files.sort((left, right) => left.localeCompare(right))
 }
 
 async function inspectTextFile (relative, problems) {
@@ -152,7 +171,7 @@ if (problems.length) {
   process.exitCode = 1
 } else {
   console.log(
-    `Public-tree audit passed: ${files.length} tracked or publishable files, ` +
+    `Public-tree audit passed: ${files.length} public file(s), ` +
     'no private library data or credential patterns detected.',
   )
 }

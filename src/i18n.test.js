@@ -8,6 +8,7 @@ import I18n, {
   LOCALE_STORAGE_KEY,
   MESSAGES,
 } from './i18n.js'
+import { SONG_ORIGIN_VERSION } from './song/song-origin.js'
 
 test('all supported locales contain the same interface message keys', () => {
   const expected = Object.keys(MESSAGES.en).sort()
@@ -72,14 +73,26 @@ test('interface instructions use locale-specific grammar and punctuation', () =>
   expect(zh.t('menu.keyEffects', { state: zh.t('common.disabled') }))
     .toBe('按键雨：关')
   expect(ja.t('menu.keyEffects', { state: ja.t('common.enabled') }))
-    .toBe('キー演出：オン')
+    .toBe('キー演出：ON')
 
-  expect(en.t('menu.demoMode', { state: en.t('common.enabled') }))
-    .toBe('Demo: On')
-  expect(zh.t('menu.demoMode', { state: zh.t('common.disabled') }))
-    .toBe('演示：关')
-  expect(ja.t('menu.demoMode', { state: ja.t('common.enabled') }))
-    .toBe('デモ：オン')
+  expect(en.t('menu.playStyle', { mode: en.t('playStyle.simple') }))
+    .toBe('Simple')
+  expect(en.t('menu.playStyleWithKey', {
+    key: 'M',
+    mode: en.t('playStyle.simple'),
+  })).toBe('Game mode (M): Simple')
+  expect(zh.t('menu.playStyle', { mode: zh.t('playStyle.simple') }))
+    .toBe('轻松')
+  expect(zh.t('menu.playStyleWithKey', {
+    key: 'M',
+    mode: zh.t('playStyle.simple'),
+  })).toBe('当前游戏模式(M)：轻松')
+  expect(ja.t('menu.playStyle', { mode: ja.t('playStyle.simple') }))
+    .toBe('かんたん')
+  expect(ja.t('menu.playStyleWithKey', {
+    key: 'M',
+    mode: ja.t('playStyle.simple'),
+  })).toBe('モード（M）：かんたん')
   expect(en.t('songInfo.cpmMax'))
     .toBe('Required keys/min (avg / fastest 5 sec)')
   expect(zh.t('songInfo.cpmMax'))
@@ -260,7 +273,7 @@ test('QQ Music displays a strictly verified original work title', () => {
   const song = {
     subtitle: '《示例中文译名》TV动画片头曲',
     origin: {
-      version: 3,
+      version: SONG_ORIGIN_VERSION,
       work_title: 'サンプル原題',
       original_language: 'ja',
       original_verified: true,

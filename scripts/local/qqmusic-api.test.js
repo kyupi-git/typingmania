@@ -45,7 +45,7 @@ test('cached media metadata falls back through lyric search hints', async () => 
   const metadataCalls = []
   const fetchMetadata = async value => {
     metadataCalls.push(value)
-    if (value === 'song-mid') return { songMid: value, title: 'Found' }
+    if (value === 'song-mid') return { songMid: value, mediaMid: 'media-mid', title: 'Found' }
     throw new Error('metadata is unavailable')
   }
   const result = await fetchTrackMetadataWithFallback(
@@ -66,7 +66,7 @@ test('cached media metadata falls back through lyric search hints', async () => 
     },
   )
 
-  expect(result).toEqual({ songMid: 'song-mid', title: 'Found' })
+  expect(result).toEqual({ songMid: 'song-mid', mediaMid: 'media-mid', title: 'Found' })
   expect(metadataCalls).toEqual(['media-mid', 'song-mid'])
 })
 

@@ -3,7 +3,7 @@ import { fetchWithRetry } from './network.js'
 
 const ENDPOINT = 'https://graphql.anilist.co'
 const CLIENT =
-  'TypingManiaNovel/20260726 (https://github.com/kyupi-git/typingmania)'
+  'TypingManiaNovel/20260808 (https://github.com/kyupi-git/typingmania)'
 
 const WORK_QUERY = `
   query TypingManiaNovelWork($search: String!) {
@@ -11,6 +11,7 @@ const WORK_QUERY = `
       media(search: $search, type: ANIME) {
         id
         format
+        countryOfOrigin
         title {
           native
           romaji
@@ -31,6 +32,7 @@ const WORK_BY_ID_QUERY = `
     Media(id: $id, type: ANIME) {
       id
       format
+      countryOfOrigin
       title {
         native
         romaji
@@ -45,7 +47,13 @@ const WORK_BY_ID_QUERY = `
   }
 `
 
-function originalLanguage (title) {
+function originalLanguage (title, countryOfOrigin = '') {
+  const country = typeof countryOfOrigin === 'object'
+    ? countryOfOrigin?.code
+    : countryOfOrigin
+  if (String(country).toLocaleUpperCase() === 'JP') return 'ja'
+  if (String(country).toLocaleUpperCase() === 'CN') return 'zh'
+  if (String(country).toLocaleUpperCase() === 'KR') return 'ko'
   if (/\p{Script=Hangul}/u.test(title)) return 'ko'
   if (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(title)) return 'ja'
   if (/\p{Script=Han}/u.test(title)) return 'zh'
@@ -99,7 +107,10 @@ export function selectAniListWorkCandidate (records, parts) {
   }
   return {
     title: String(best.candidate.title.native).trim(),
-    language: originalLanguage(best.candidate.title.native),
+    language: originalLanguage(
+      best.candidate.title.native,
+      best.candidate.countryOfOrigin,
+    ),
     catalog: 'anilist',
     catalogId: String(best.candidate.id),
     posterUrl: String(
@@ -177,7 +188,7 @@ export async function fetchAniListWorkById (
   if (!media?.id || !title) return null
   return {
     title,
-    language: originalLanguage(title),
+    language: originalLanguage(title, media.countryOfOrigin),
     catalog: 'anilist',
     catalogId: String(media.id),
     posterUrl: String(

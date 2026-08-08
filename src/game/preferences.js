@@ -5,6 +5,7 @@ export const SONG_SORT_DIRECTION_STORAGE_KEY = 'typingmania:preferences:song-sor
 
 const SONG_SORT_MODES = new Set(['added', 'cpm', 'title', 'artist'])
 const SONG_SORT_DIRECTIONS = new Set(['asc', 'desc'])
+const PLAY_STYLES = new Set(['normal', 'simple', 'demo'])
 
 function browserStorage () {
   try {
@@ -73,6 +74,10 @@ export default class GamePreferences {
       SONG_SORT_DIRECTIONS,
       'asc',
     )
+    // Play style is deliberately session-scoped. Every launch starts in the
+    // score-comparable Standard mode; Simple and Demo remain explicit choices
+    // for the current session only.
+    this.playStyle = 'normal'
   }
 
   setKeyEffectsEnabled (enabled) {
@@ -122,6 +127,13 @@ export default class GamePreferences {
       )
     } catch {}
     return changed
+  }
+
+  setPlayStyle (style) {
+    const next = PLAY_STYLES.has(style) ? style : 'normal'
+    if (next === this.playStyle) return false
+    this.playStyle = next
+    return true
   }
 
 }

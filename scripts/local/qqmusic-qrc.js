@@ -11,9 +11,11 @@ import {
   LYRIC_QUALITY_VERSION,
   normalizeLyricComparable,
   reconcileQrcWithOfficial,
+  stripInlineLyricRuby,
 } from './lyrics-quality.js'
 import { normalizeLyricTimingWindows } from './timed-lyrics.js'
 import {
+  assertOriginalLyricLayer,
   normalizePronunciation,
   PRONUNCIATION_QUALITY_VERSION,
   pronunciationForLine,
@@ -160,6 +162,7 @@ export async function convertQrcFiles ({
   romaFile = null,
   metadata = {},
   officialLines = [],
+  pronunciationVerified = false,
 }) {
   if (isNonVocalTrackMetadata(metadata)) {
     throw new Error('The track is marked as instrumental or non-vocal')
@@ -171,6 +174,7 @@ export async function convertQrcFiles ({
   }
   const mainFilter = filterLyricLines(parsedMainLines, metadata)
   let mainLines = mainFilter.kept
+  assertOriginalLyricLayer(metadata, mainLines)
 
   let romaLines = []
   let romaFilter = { kept: [], removed: [] }
@@ -194,6 +198,10 @@ export async function convertQrcFiles ({
   let generatedPinyinLines = 0
   let songSpecificPronunciationLines = 0
   let pronunciationOverrideLines = 0
+  let explicitRubyLines = 0
+  let dictionaryPronunciationLines = 0
+  let pendingPronunciationLines = 0
+  let verifiedPronunciationLines = 0
   const verificationReadings = []
   const usedReadings = new Set(pairs.filter(pair => pair.reading).map(pair => pair.reading))
 
@@ -208,16 +216,26 @@ export async function convertQrcFiles ({
       continue
     }
 
-    const base = escapeTypingMania(pair.main.text)
+    const visibleText = stripInlineLyricRuby(pair.main.text)
+    const base = escapeTypingMania(visibleText)
     const readingTimingComplete = Boolean(
       pair.reading && hasCompleteTokenTiming(pair.reading, nextStart),
     )
-    const pronunciation = pronunciationForLine({
+    const pronunciation = await pronunciationForLine({
       text: pair.main.text,
       providedReading: readingTimingComplete ? pair.reading?.text : '',
       language: metadata.language,
     })
+    if (pronunciation.family === 'ja' && pronunciation.source === 'qqmusic-qrc-roma' && !pronunciationVerified) {
+      pronunciation.status = 'pending'
+    }
     const reading = pronunciation.reading
+    if (pronunciation.family === 'ja') {
+      if (pronunciation.explicitRuby) explicitRubyLines++
+      if (pronunciation.source === 'dictionary') dictionaryPronunciationLines++
+      if (pronunciation.status === 'pending') pendingPronunciationLines++
+      if (pronunciation.status === 'verified') verifiedPronunciationLines++
+    }
     let lyric
     let canType = false
     if (
@@ -306,7 +324,7 @@ export async function convertQrcFiles ({
   const [lyricsCsv] = buildSongLyrics(output, paceOptions)
   const [, cpm, maxCpm] = buildSongLyrics(typable, paceOptions)
   const deltas = pairs.filter(pair => pair.timingDelta !== null).map(pair => pair.timingDelta)
-  const verificationLines = mainLines.map(line => line.text)
+  const verificationLines = mainLines.map(line => stripInlineLyricRuby(line.text))
   const fingerprint = crypto
     .createHash('sha256')
     .update(verificationLines.map(normalizeLyricComparable).join('\n'))
@@ -341,6 +359,11 @@ export async function convertQrcFiles ({
       generatedPinyinLines,
       songSpecificPronunciationLines,
       pronunciationOverrideLines,
+      pronunciationStatus: pendingPronunciationLines > 0 ? (explicitRubyLines > 0 ? 'ruby-assisted' : 'pending') : (explicitRubyLines > 0 ? 'ruby-assisted' : 'verified'),
+      explicitRubyLines,
+      dictionaryPronunciationLines,
+      pendingPronunciationLines,
+      verifiedPronunciationLines,
       timingWindowsAdjusted: timing.adjusted,
       instrumentalGapMsRemoved: timing.removedGapMs,
       typicalMsPerKey: timing.typicalMsPerKey,

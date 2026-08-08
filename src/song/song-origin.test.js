@@ -5,6 +5,7 @@ import {
   hasVerifiedOriginalWorkTitle,
   localizeSongOrigin,
   parseSongOrigin,
+  SONG_ORIGIN_VERSION,
 } from './song-origin.js'
 
 test('localizes a Chinese TV anime ending origin locally', () => {
@@ -39,6 +40,12 @@ test('localizes film themes and Japanese origins in either direction', () => {
     .toBe('TV动画《サンプル作品》片尾曲')
   expect(localizeSongOrigin('劇場版アニメ『サンプル映画』主題歌', 'en'))
     .toBe('Theme song for the anime film “サンプル映画”')
+})
+
+test('recognizes Chinese and Japanese anime-film wording before generic animation', () => {
+  expect(parseSongOrigin('《示例电影》动画电影主题曲')).toMatchObject({ media: 'film' })
+  expect(parseSongOrigin('《示例电影》动漫电影片尾曲')).toMatchObject({ media: 'film' })
+  expect(parseSongOrigin('『サンプル映画』アニメ映画主題歌')).toMatchObject({ media: 'film' })
 })
 
 test('distinguishes live-action television and film credits from animation', () => {
@@ -90,7 +97,7 @@ test('keeps nested title punctuation paired while parsing and formatting', () =>
   })
 
   const origin = {
-    version: 3,
+    version: SONG_ORIGIN_VERSION,
     work_title: workTitle,
     original_verified: true,
     title_source: 'catalog-primary',
@@ -147,14 +154,14 @@ test('parses and formats a stored official work title independently', () => {
 
 test('verified original work titles require current provenance metadata', () => {
   expect(hasVerifiedOriginalWorkTitle({
-    version: 3,
+    version: SONG_ORIGIN_VERSION,
     work_title: 'サンプル作品',
     original_language: 'ja',
     original_verified: true,
     title_source: 'catalog-primary',
   })).toBe(true)
   expect(hasVerifiedOriginalWorkTitle({
-    version: 3,
+    version: SONG_ORIGIN_VERSION,
     work_title: '示例中文译名',
     original_language: 'ja',
   })).toBe(false)

@@ -1,4 +1,5 @@
 import { pinyin } from '../../vendor/runtime/node_modules/pinyin-pro/dist/index.mjs'
+import { isLikelyArtistName, normalizeArtistCredits, splitArtistCredits } from './original-artist.js'
 
 export function catalogIdentity (value) {
   return String(value || '')
@@ -63,10 +64,27 @@ function metadataArtists (value) {
   const artists = value?.artistNames?.length
     ? value.artistNames
     : [value?.artist]
-  return artists
-    .flatMap(artist => String(artist || '').split(/\s*[,/&、;]\s*/u))
-    .map(artist => artist.trim())
-    .filter(Boolean)
+  return normalizeArtistCredits(artists.flatMap(artist => splitArtistCredits(artist)))
+    .filter(isLikelyArtistName)
+}
+
+function artistSetSimilarity (expected, candidate) {
+  if (!expected.length || !candidate.length || expected.length !== candidate.length) return 0
+  const used = new Set()
+  let total = 0
+  for (const left of expected) {
+    let best = 0
+    let bestIndex = -1
+    candidate.forEach((right, index) => {
+      if (used.has(index)) return
+      const score = catalogTextSimilarity(left, right)
+      if (score > best) { best = score; bestIndex = index }
+    })
+    if (bestIndex < 0) return 0
+    used.add(bestIndex)
+    total += best
+  }
+  return total / expected.length
 }
 
 /**
@@ -83,26 +101,9 @@ export function catalogMetadataConfidence (expected, candidate) {
   )
   const expectedArtists = metadataArtists(expected)
   const candidateArtists = metadataArtists(candidate)
-  let artistSimilarity = 0
-  for (const left of expectedArtists) {
-    for (const right of candidateArtists) {
-      artistSimilarity = Math.max(
-        artistSimilarity,
-        catalogTextSimilarity(left, right),
-      )
-      const literalLeft = catalogIdentity(left)
-      const literalRight = catalogIdentity(right)
-      if (
-        Math.min(literalLeft.length, literalRight.length) >= 3 &&
-        (
-          literalLeft.includes(literalRight) ||
-          literalRight.includes(literalLeft)
-        )
-      ) {
-        artistSimilarity = Math.max(artistSimilarity, 0.86)
-      }
-    }
-  }
+  let artistSimilarity = artistSetSimilarity(expectedArtists, candidateArtists)
+  // A single maximum pair is unsafe: a cover by one matching artist, or a
+  // role/CV row split into two fields, must not replace a multi-artist song.
 
   const expectedDuration = Number(expected?.duration) || 0
   const candidateDuration = Number(candidate?.duration) || 0
@@ -117,7 +118,15 @@ export function catalogMetadataConfidence (expected, candidate) {
         ? 0.12
         : durationDelta <= 5
           ? 0.05
-          : 0
+        : 0
+
+  const versionMarker = value => String(value || '').normalize('NFKC')
+    .toLocaleLowerCase()
+    .match(/(?:\blive\b|\bcover\b|\bremix\b|\bkaraoke\b|\boff[- ]?vocal\b|翻唱|现场|現場|混音|重混|伴奏|カバー|ライブ|リミックス)/iu)?.[0] || ''
+  const expectedVersion = versionMarker(expected?.title)
+  const candidateVersion = versionMarker(candidate?.title)
+  const versionMismatch = expectedVersion !== candidateVersion &&
+    Boolean(expectedVersion || candidateVersion)
 
   let confidence = titleSimilarity * 0.54 +
     artistSimilarity * 0.30 +
@@ -126,7 +135,7 @@ export function catalogMetadataConfidence (expected, candidate) {
   if (artistSimilarity === 1) confidence += 0.03
   confidence = Math.min(1, confidence)
 
-  const safe = (
+  const safe = !versionMismatch && (
     titleSimilarity >= 0.82 &&
     artistSimilarity >= 0.72 &&
     (durationDelta === null || durationDelta <= 5) &&
@@ -146,6 +155,7 @@ export function catalogMetadataConfidence (expected, candidate) {
     titleSimilarity,
     artistSimilarity,
     durationDelta,
+    versionMismatch,
     verifiedFields,
   }
 }

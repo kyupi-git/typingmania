@@ -2,15 +2,15 @@ import {
   catalogTextSimilarity,
 } from './catalog-identity.js'
 import {
+  collectNetworkSources,
   inferNetworkRegion,
-  tryNetworkSources,
 } from './network-source-planner.js'
 import { fetchWithTimeout } from './network.js'
 import { searchAniListWork } from './anilist-api.js'
 import { searchWikidataWork } from './wikidata-api.js'
 
 const CLIENT =
-  'TypingManiaNovel/20260726 (https://github.com/kyupi-git/typingmania)'
+  'TypingManiaNovel/20260808 (https://github.com/kyupi-git/typingmania)'
 const TMDB_LOCALE = {
   cn: 'zh-CN',
   hk: 'zh-HK',
@@ -33,15 +33,104 @@ function languageCode (value) {
 }
 
 async function fetchJson (url, fetchImpl, timeoutMs, options = {}) {
+  const { headers = {}, ...requestOptions } = options
   const response = await fetchWithTimeout(fetchImpl, url, {
+    ...requestOptions,
     headers: {
       Accept: 'application/json',
       'User-Agent': CLIENT,
-      ...(options.headers || {}),
+      ...headers,
     },
   }, timeoutMs)
   if (!response.ok) throw new Error(`Media catalog HTTP ${response.status}`)
   return response.json()
+}
+
+export async function searchVndbWork (
+  parts,
+  {
+    fetchImpl = globalThis.fetch,
+    timeoutMs = 3800,
+  } = {},
+) {
+  if (parts?.media !== 'visual-novel' || !parts.workTitle) return null
+  const payload = await fetchJson(
+    'https://api.vndb.org/kana/vn',
+    fetchImpl,
+    timeoutMs,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filters: ['search', '=', parts.workTitle],
+        fields: 'id,title,alttitle,titles.lang,titles.title,titles.main,image.url',
+        results: 6,
+      }),
+    },
+  )
+  const candidates = (payload.results || []).map(result => {
+    const titles = [
+      ...(result.titles || []).map(value => ({
+        title: String(value.title || ''),
+        language: String(value.lang || ''),
+        main: Boolean(value.main),
+      })),
+      { title: String(result.title || ''), language: '', main: false },
+      { title: String(result.alttitle || ''), language: '', main: false },
+    ].filter(value => value.title)
+    const confidence = Math.max(
+      ...titles.map(value => catalogTextSimilarity(
+        parts.workTitle,
+        value.title,
+      )),
+      0,
+    )
+    const original = titles.find(value => value.main && value.language === 'ja') ||
+      titles.find(value => value.language === 'ja') ||
+      titles.find(value => value.main && value.language) ||
+      null
+    return original && {
+      title: original.title,
+      language: original.language,
+      catalog: 'vndb',
+      catalogId: String(result.id || ''),
+      posterUrl: String(result.image?.url || ''),
+      evidence: 'vndb-original-title',
+      confidence: Math.min(0.97, confidence * 0.92 + 0.04),
+    }
+  }).filter(value => (
+    value?.catalogId && value.title && value.confidence >= 0.82
+  )).sort((left, right) => right.confidence - left.confidence)
+  return candidates[0] || null
+}
+
+export async function searchSteamWork (
+  parts,
+  {
+    fetchImpl = globalThis.fetch,
+    timeoutMs = 3200,
+  } = {},
+) {
+  if (!['game', 'jrpg'].includes(parts?.media) || !parts.workTitle) {
+    return null
+  }
+  const url = new URL('https://store.steampowered.com/api/storesearch/')
+  url.searchParams.set('term', parts.workTitle)
+  url.searchParams.set('l', 'english')
+  url.searchParams.set('cc', 'US')
+  const payload = await fetchJson(url, fetchImpl, timeoutMs)
+  const candidates = (payload.items || []).map(result => ({
+    title: String(result.name || ''),
+    language: 'und',
+    catalog: 'steam',
+    catalogId: String(result.id || ''),
+    posterUrl: '',
+    evidence: 'steam-catalog-title',
+    confidence: catalogTextSimilarity(parts.workTitle, result.name),
+  })).filter(value => (
+    value.catalogId && value.title && value.confidence >= 0.9
+  )).sort((left, right) => right.confidence - left.confidence)
+  return candidates[0] || null
 }
 
 async function tvmazeAliases (showId, fetchImpl, timeoutMs) {
@@ -227,6 +316,25 @@ export async function resolveGeneralMediaWork (
           }),
         }]
       : []),
+    ...(parts?.media === 'visual-novel'
+      ? [{
+          id: 'vndb-media',
+          priority: 38,
+          regionalPriority: {
+            cn: 8,
+            hk: 34,
+            tw: 34,
+            jp: 48,
+            us: 38,
+            eu: 36,
+            global: 34,
+          },
+          run: () => searchVndbWork(parts, {
+            fetchImpl,
+            timeoutMs,
+          }),
+        }]
+      : []),
     ...(['television', 'documentary', 'variety'].includes(parts?.media)
       ? [{
           id: 'tvmaze-media',
@@ -240,6 +348,25 @@ export async function resolveGeneralMediaWork (
             global: 42,
           },
           run: () => searchTvmazeWork(parts, {
+            fetchImpl,
+            timeoutMs,
+          }),
+        }]
+      : []),
+    ...(['game', 'jrpg'].includes(parts?.media)
+      ? [{
+          id: 'steam-media',
+          priority: 18,
+          regionalPriority: {
+            cn: -5,
+            hk: 24,
+            tw: 24,
+            jp: 28,
+            us: 38,
+            eu: 38,
+            global: 30,
+          },
+          run: () => searchSteamWork(parts, {
             fetchImpl,
             timeoutMs,
           }),
@@ -267,6 +394,37 @@ export async function resolveGeneralMediaWork (
     },
   ]
   if (!sources.length) return null
-  const resolved = await tryNetworkSources(sources, { region })
-  return resolved?.value || null
+  const resolved = await collectNetworkSources(sources, {
+    region,
+    maxAccepted: 3,
+    maxAttempts: 5,
+  })
+  const matches = resolved.map(item => item.value).filter(Boolean)
+  const authority = new Map([
+    ['vndb', 60],
+    ['tmdb', 55],
+    ['anilist', 52],
+    ['tvmaze', 48],
+    ['wikidata', 46],
+    // Steam is useful independent identity evidence, but its storefront title
+    // can be localized and must never become the displayed original by itself.
+    ['steam', 10],
+  ])
+  const primary = [...matches].sort((left, right) => (
+    (authority.get(right.catalog) || 0) - (authority.get(left.catalog) || 0) ||
+    Number(right.confidence || 0) - Number(left.confidence || 0)
+  )).find(match => match.catalog !== 'steam')
+  if (!primary) return null
+  const corroboratedBy = matches.filter(match => (
+    match !== primary &&
+    match.catalog !== primary.catalog &&
+    catalogTextSimilarity(primary.title, match.title) >= 0.82
+  )).map(match => match.catalog)
+  return {
+    ...primary,
+    corroboratedBy: [...new Set(corroboratedBy)],
+    confidence: corroboratedBy.length
+      ? Math.min(1, Math.max(Number(primary.confidence) || 0, 0.94))
+      : primary.confidence,
+  }
 }

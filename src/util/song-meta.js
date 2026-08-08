@@ -3,9 +3,12 @@ import Romanizer from '../typing/romanizer.js'
 import latinTable from '../../latin-table/latin-table.js'
 import { createDemoLineSchedule } from '../game/demo-player.js'
 import { buildPerformanceSummary } from '../game/performance.js'
+import { createAssistLinePlan } from '../game/assist-player.js'
+import Typing from '../typing/typing.js'
 
 const romanizer = new Romanizer(latinTable)
 export const PACE_METADATA_VERSION = 3
+export const ASSIST_PACE_METADATA_VERSION = 1
 
 export function songMetaFromAss (assInfo) {
   const metadataFields = ['title', 'subtitle', 'artist']
@@ -67,6 +70,48 @@ export function estimateReferencePace (songLyrics, {
   const duration = Math.max(lastEnd, Number(durationMs) / 1000 || 0, 0.1)
   const performance = buildPerformanceSummary(events, duration)
   return {
+    averageCpm: typingTime > 0
+      ? Math.round(60 * correct / typingTime)
+      : 0,
+    peakCpm: performance.peakPace,
+  }
+}
+
+export function estimateAssistReferencePace (
+  lyricsCsv,
+  language = 'U',
+  { durationMs = 0 } = {},
+) {
+  const typing = lyricsCsv instanceof Typing
+    ? lyricsCsv
+    : new Typing(String(lyricsCsv || ''))
+  let correct = 0
+  let typingTime = 0
+  let lastEnd = 0
+  const events = []
+  for (let lineId = 0; lineId < typing.lines.length; lineId++) {
+    const line = typing.lines[lineId]
+    const plan = createAssistLinePlan(line, language)
+    const text = plan.gates.map(index => plan.keys[index]).join('')
+    const schedule = createDemoLineSchedule({
+      text,
+      startTime: line.start_time,
+      endTime: line.end_time,
+      lineId,
+    })
+    if (schedule.times.length) {
+      correct += schedule.times.length
+      typingTime += schedule.times.at(-1) - line.start_time
+      for (const time of schedule.times) {
+        events.push({ time, outcome: 'correct', tension: 0 })
+      }
+    }
+    lastEnd = Math.max(lastEnd, line.end_time)
+  }
+  const duration = Math.max(lastEnd, Number(durationMs) / 1000 || 0, 0.1)
+  const performance = buildPerformanceSummary(events, duration)
+  return {
+    requiredKeys: correct,
     averageCpm: typingTime > 0
       ? Math.round(60 * correct / typingTime)
       : 0,

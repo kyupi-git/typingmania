@@ -7,7 +7,7 @@ import { fetchWithRetry } from './network.js'
 
 const API_ORIGIN = 'https://api.animethemes.moe'
 const CLIENT =
-  'TypingManiaNovel/20260726 (https://github.com/kyupi-git/typingmania)'
+  'TypingManiaNovel/20260808 (https://github.com/kyupi-git/typingmania)'
 
 function compactIdentity (value) {
   return String(value || '')

@@ -16,5 +16,14 @@ original archive remains unchanged, and its complete license is reproduced in
 `NODE-LICENSE.txt`. On non-x64 Windows systems, the launcher falls back to a
 compatible system installation of Node.js 20 or newer.
 
+`terminate.cmd` prefers the current runtime but can also use a compatible
+`node.exe` unpacked by an older TypingManiaNovel release. This lets a player
+stop a verified older local service before the current archive has been
+extracted.
+
 The archive is runtime infrastructure only. It does not contain QQ Music,
 browser translation models, music, lyrics, covers, account cookies, or ekeys.
+The vendored runtime dependency graph also includes `kuromoji` 0.1.2 and its
+Apache-2.0/MIT licensed dependencies for offline Japanese pronunciation
+assistance; their package metadata and license files remain under
+`vendor/runtime/node_modules`.

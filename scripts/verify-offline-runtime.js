@@ -31,6 +31,7 @@ const expectedPackages = {
   ms: ['2.1.3', 'MIT'],
   'music-metadata': ['11.14.0', 'MIT'],
   'pinyin-pro': ['3.28.1', 'MIT'],
+  undici: ['6.28.0', 'MIT'],
   strtok3: ['10.3.5', 'MIT'],
   'token-types': ['6.1.2', 'MIT'],
   'uint8array-extras': ['1.5.0', 'MIT'],

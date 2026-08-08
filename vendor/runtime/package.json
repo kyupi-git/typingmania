@@ -6,7 +6,9 @@
   "type": "module",
   "dependencies": {
     "@clamber_l/crypto": "0.1.12",
+    "kuromoji": "0.1.2",
     "music-metadata": "11.14.0",
-    "pinyin-pro": "3.28.1"
+    "pinyin-pro": "3.28.1",
+    "undici": "6.28.0"
   }
 }

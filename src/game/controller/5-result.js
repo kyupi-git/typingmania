@@ -16,8 +16,14 @@ export default class ResultController {
     this.game.result_screen.setSong(song)
     this.game.score.setToResultScreen(this.game.result_screen, {
       duration: this.game.score.play_duration || song.duration,
-      referenceAverageCpm: Number(song.cpm) || 0,
-      referencePeakCpm: Number(song.max_cpm) || 0,
+      referenceAverageCpm: Number(
+        this.game.game_mode === 'assist' ? song.assist_cpm : song.cpm,
+      ) || 0,
+      referencePeakCpm: Number(
+        this.game.game_mode === 'assist'
+          ? song.assist_max_cpm
+          : song.max_cpm,
+      ) || 0,
     })
 
     await this.game.input.waitForAnyKey()

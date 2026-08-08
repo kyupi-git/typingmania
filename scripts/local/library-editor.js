@@ -111,17 +111,107 @@ function editableRecords (root, records) {
   ))
 }
 
+export function songCompleteness (record) {
+  const source = record.source || {}
+  const checks = source.checks || {}
+  const quality = source.quality || {}
+  const pronunciationStatus = ['verified', 'ruby-assisted', 'pending']
+    .includes(quality.pronunciation_status)
+    ? quality.pronunciation_status
+    : (
+        source.pronunciation_fingerprint && (
+          checks.pronunciation_complete === true ||
+          checks.pronunciation_online === true
+        )
+          ? 'verified'
+          : 'pending'
+      )
+  const cover = source.cover || {}
+  const origin = record.origin || {}
+  const artistResolution = source.artist_resolution
+  const artistStatus = artistResolution
+    ? (artistResolution.resolved === true ? 'verified' : 'pending')
+    : (checks.artist_original === true || !source.service ? 'verified' : 'pending')
+  const fields = {
+    identity: Boolean(
+      String(record.title || '').trim() &&
+      String(record.artist || '').trim() &&
+      artistStatus === 'verified' &&
+      (
+        checks.metadata === true ||
+        checks.metadata_canonical === true ||
+        source.metadata_resolution?.resolved === true
+      )
+    ),
+    lyrics: Boolean(
+      source.lyrics_fingerprint &&
+      Number(quality.playable_lines) > 0 &&
+      (
+        checks.lyrics_timed === true ||
+        checks.lyrics_online === true
+      )
+    ),
+    pronunciation: pronunciationStatus !== 'pending' && Boolean(
+      source.pronunciation_fingerprint &&
+      (
+        checks.pronunciation_complete === true ||
+        checks.pronunciation_online === true
+      )
+    ),
+    origin: Boolean(
+      origin.work_title &&
+      origin.original_verified === true &&
+      origin.catalog &&
+      origin.catalog_id
+    ),
+    poster: Boolean(
+      record.poster &&
+      (
+        cover.poster_identity_verified === true ||
+        checks.poster_online === true
+      )
+    ),
+    album: Boolean(
+      record.image &&
+      (
+        cover.verified_online === true ||
+        checks.cover_online === true
+      )
+    ),
+  }
+  const score = Object.values(fields).filter(Boolean).length
+  return {
+    ...fields,
+    pronunciationStatus,
+    score,
+    total: Object.keys(fields).length,
+    complete: score === Object.keys(fields).length,
+    artistStatus,
+  }
+}
+
 export async function inspectEditableLibrary (root) {
   const resolvedRoot = path.resolve(root)
   const library = await scanSongLibrary(resolvedRoot)
-  const songs = editableRecords(resolvedRoot, library.records).map(record => ({
-    id: record.url,
-    title: String(record.title || ''),
-    artist: String(record.artist || ''),
-    language: String(record.language || ''),
-    source: String(record.source?.service || ''),
-  }))
-  return { songs, count: songs.length }
+  const songs = editableRecords(resolvedRoot, library.records).map(record => {
+    const relativeDirectory = path.dirname(record.url)
+      .split(/[\\/]+/u)
+      .slice(0, 3)
+      .join('/')
+    return {
+      id: record.url,
+      title: String(record.title || ''),
+      artist: String(record.artist || ''),
+      source: String(record.source?.service || ''),
+      directory: relativeDirectory === '.' ? '' : relativeDirectory,
+      completeness: songCompleteness(record),
+    }
+  })
+  return {
+    songs,
+    count: songs.length,
+    incomplete: songs.filter(song => !song.completeness.complete).length,
+  }
 }
 
 async function pruneCacheFile (filename, keepEntry) {

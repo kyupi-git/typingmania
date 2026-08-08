@@ -60,13 +60,21 @@ export function parseTasklistImage (text) {
     : null
 }
 
-export function parseManagedRecord (text) {
+export function parseManagedRecord (text, fallbackPort = 0) {
+  const raw = String(text || '').trim()
   try {
-    const record = JSON.parse(String(text || '').trim())
-    return Number(record?.port) > 0 ? record : null
-  } catch {
-    return null
-  }
+    const record = JSON.parse(raw)
+    if (Number(record?.port) > 0) return record
+  } catch {}
+  const processId = /^\d+$/u.test(raw) ? Number(raw) : 0
+  return processId > 0 && Number(fallbackPort) > 0
+    ? {
+        version: 0,
+        processId,
+        port: Number(fallbackPort),
+        legacy: true,
+      }
+    : null
 }
 
 export function parseBrowserRecord (text) {
@@ -135,8 +143,12 @@ async function managedRecords () {
       continue
     }
     const filename = path.join(DATA_DIRECTORY, entry.name)
+    const port = entry.name === 'local-server.pid'
+      ? 8765
+      : Number(entry.name.match(/^local-server\.(\d+)\.pid$/u)?.[1])
     const record = parseManagedRecord(
       await fs.readFile(filename, 'utf8').catch(() => ''),
+      port,
     )
     records.push({ filename, record })
   }
@@ -206,7 +218,9 @@ export async function terminateLocalServers () {
   const records = await managedRecords()
   const ports = new Set(PORT_RANGE)
   for (const { record } of records) {
-    if (recordBelongsToProject(record)) ports.add(Number(record.port))
+    if (recordBelongsToProject(record) || record?.legacy === true) {
+      ports.add(Number(record.port))
+    }
   }
 
   const stopped = []
@@ -225,7 +239,7 @@ export async function terminateLocalServers () {
 
   for (const { filename, record } of records) {
     if (
-      recordBelongsToProject(record) &&
+      (recordBelongsToProject(record) || record?.legacy === true) &&
       (
         stopped.includes(Number(record.port)) ||
         !await localStatus(Number(record.port))

@@ -1,9 +1,13 @@
 import { analyzeSongTitle } from '../../src/song/song-title.js'
 import { normalizeLyricComparable } from './lyrics-quality.js'
-import { fetchFirstAvailable } from './network.js'
+import { fetchWithTimeout } from './network.js'
+import { LRCLIB_API_ROUTES } from './network-route-catalog.js'
+import {
+  inferNetworkRegion,
+  tryNetworkSources,
+} from './network-source-planner.js'
 
-const CLIENT = 'TypingManiaNovel/20260726 (https://github.com/kyupi-git/typingmania)'
-const ORIGINS = ['https://lrclib.net', 'https://www.lrclib.net']
+const CLIENT = 'TypingManiaNovel/20260808 (https://github.com/kyupi-git/typingmania)'
 
 function normalizedTitle (value, language) {
   return normalizeLyricComparable(analyzeSongTitle(value, { language }).title)
@@ -35,19 +39,32 @@ function matchesSignature (record, metadata) {
 }
 
 async function fetchJsonRoutes (pathname, fetchImpl) {
-  const { response } = await fetchFirstAvailable(
-    fetchImpl,
-    ORIGINS.map(origin => `${origin}${pathname}`),
-    {
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': CLIENT,
-        'Lrclib-Client': CLIENT,
-      },
+  const sources = LRCLIB_API_ROUTES.map(route => ({
+    ...route,
+    category: 'lyrics',
+    run: async () => {
+      const response = await fetchWithTimeout(
+        fetchImpl,
+        `${route.baseUrl}${pathname}`,
+        {
+          headers: {
+            Accept: 'application/json',
+            'User-Agent': CLIENT,
+            'Lrclib-Client': CLIENT,
+          },
+        },
+        2600,
+      )
+      if (!response.ok) throw new Error(`${route.name} HTTP ${response.status}`)
+      return response.json()
     },
-    { timeoutMs: 5200, perAttemptMs: 2500 },
-  )
-  return response.json()
+  }))
+  const resolved = await tryNetworkSources(sources, {
+    accept: value => Boolean(value),
+    region: inferNetworkRegion(),
+  })
+  if (!resolved) throw new Error('LRCLIB API routes are unavailable')
+  return resolved.value
 }
 
 function lyricResource (record) {

@@ -23,6 +23,7 @@ export default class SongInfoScreen extends Screen {
     super(viewport, 0, 0, 1920, 1080)
     this.i18n = i18n
     this.current_song = null
+    this.current_mode = 'normal'
     this.create(20, [
       Group(0, 0, 1920, 1080, [
         this.song_path = Txt(70, 80, 1090, 30).font(SongFont.size(24)).color(White).noOverflow(),
@@ -63,7 +64,11 @@ export default class SongInfoScreen extends Screen {
   }
 
   setLocale () {
-    this.high_score_label.text(this.i18n.t('songInfo.highScore'))
+    this.high_score_label.text(this.i18n.t(
+      this.current_mode === 'assist'
+        ? 'songInfo.standardHighScore'
+        : 'songInfo.highScore',
+    ))
     this.length_label.text(this.i18n.t('songInfo.length'))
     this.cpm_label.text(this.i18n.t('songInfo.cpmMax'))
     const cpmHelp = this.i18n.t('songInfo.cpmHelp')
@@ -120,12 +125,28 @@ export default class SongInfoScreen extends Screen {
 
       this.song_highscore.text(song.high_score > 0 ? `${format_number_comma(song.high_score)} [${song.high_score_class}]` : '---')
       this.song_duration.text(format_time(song.duration))
-      this.song_cpm.text(`${format_number_fixed(song.cpm, 3)} / ${format_number_fixed(song.max_cpm, 3)}`)
+      const averageCpm = this.current_mode === 'assist'
+        ? song.assist_cpm
+        : song.cpm
+      const peakCpm = this.current_mode === 'assist'
+        ? song.assist_max_cpm
+        : song.max_cpm
+      this.song_cpm.text(`${format_number_fixed(averageCpm, 3)} / ${format_number_fixed(peakCpm, 3)}`)
 
       this.song_sub_group.show()
       this.collection_sub_group.hide()
       this.song_path.show()
     }
+  }
+
+  updateGameMode (mode) {
+    this.current_mode = mode
+    this.high_score_label.text(this.i18n.t(
+      mode === 'assist'
+        ? 'songInfo.standardHighScore'
+        : 'songInfo.highScore',
+    ))
+    if (this.current_song) this.updateSong(this.current_song)
   }
 
   menuMode (yes) {

@@ -4,14 +4,15 @@ import {
   catalogTextSimilarity,
 } from './catalog-identity.js'
 import { fetchWithRetry } from './network.js'
+import { MUSICBRAINZ_API_ROUTES } from './network-route-catalog.js'
+import {
+  inferNetworkRegion,
+  tryNetworkSources,
+} from './network-source-planner.js'
 import { validImage } from './qqmusic-api.js'
 
-const API_ORIGINS = [
-  'https://musicbrainz.org',
-  'https://beta.musicbrainz.org',
-]
 const CLIENT =
-  'TypingManiaNovel/20260726 (https://github.com/kyupi-git/typingmania)'
+  'TypingManiaNovel/20260808 (https://github.com/kyupi-git/typingmania)'
 let lastOfficialRequestAt = 0
 
 async function respectOfficialRateLimit (fetchImpl) {
@@ -101,75 +102,76 @@ export async function searchMusicBrainzTrack (
     metadata?.artistNames?.[0] || metadata?.artist || '',
   ).trim()
   if (!title) return null
-  let lastError = null
-  for (const origin of API_ORIGINS) {
-    try {
-      const payload = await searchRoute(
-        origin,
+  const resolved = await tryNetworkSources(
+    MUSICBRAINZ_API_ROUTES.map(route => ({
+      ...route,
+      category: 'music',
+      run: () => searchRoute(
+        route.baseUrl,
         titleOnly ? title : `${title} ${artist}`.trim(),
         fetchImpl,
         timeoutMs,
+      ),
+    })),
+    {
+      accept: value => Boolean(value),
+      region: inferNetworkRegion(),
+    },
+  )
+  const candidates = (resolved?.value?.recordings || [])
+    .map(recording => {
+      const candidate = metadataFromMusicBrainzRecording(
+        recording,
+        metadata,
       )
-      const candidates = (payload.recordings || [])
-        .map(recording => {
-          const candidate = metadataFromMusicBrainzRecording(
-            recording,
-            metadata,
-          )
-          const verification = catalogMetadataConfidence(metadata, candidate)
-          const repairCandidate = (
-            verification.titleSimilarity >= 0.82 &&
-            (
-              verification.durationDelta === null ||
-              verification.durationDelta <= 3.5
-            )
-          )
-          return {
-            recording,
-            candidate,
-            verification,
-            repairCandidate,
-            score: verification.confidence * 100 +
-              Math.min(100, Number(recording.score) || 0) * 0.08,
-          }
-        })
-        .filter(value => (
-          value.verification.safe ||
-          (allowIdentityRepair && value.repairCandidate)
-        ))
-        .sort((left, right) => right.score - left.score)
-      const best = candidates[0]
-      if (!best) {
-        if (artist && !titleOnly) {
-          return searchMusicBrainzTrack(metadata, {
-            fetchImpl,
-            timeoutMs,
-            allowIdentityRepair,
-            titleOnly: true,
-          })
-        }
-        return null
-      }
+      const verification = catalogMetadataConfidence(metadata, candidate)
+      const repairCandidate = (
+        verification.titleSimilarity >= 0.82 &&
+        (
+          verification.durationDelta === null ||
+          verification.durationDelta <= 3.5
+        )
+      )
       return {
-        service: 'musicbrainz',
-        id: best.candidate.musicBrainzRecordingId,
-        metadata: {
-          ...best.candidate,
-          catalogVerification: {
-            source: 'musicbrainz',
-            safe: best.verification.safe,
-            repairCandidate: best.repairCandidate,
-            confidence: best.verification.confidence,
-            verifiedFields: best.verification.verifiedFields,
-          },
-        },
+        recording,
+        candidate,
+        verification,
+        repairCandidate,
+        score: verification.confidence * 100 +
+          Math.min(100, Number(recording.score) || 0) * 0.08,
       }
-    } catch (error) {
-      lastError = error
+    })
+    .filter(value => (
+      value.verification.safe ||
+      (allowIdentityRepair && value.repairCandidate)
+    ))
+    .sort((left, right) => right.score - left.score)
+  const best = candidates[0]
+  if (!best) {
+    if (artist && !titleOnly) {
+      return searchMusicBrainzTrack(metadata, {
+        fetchImpl,
+        timeoutMs,
+        allowIdentityRepair,
+        titleOnly: true,
+      })
     }
+    return null
   }
-  if (lastError) throw lastError
-  return null
+  return {
+    service: 'musicbrainz',
+    id: best.candidate.musicBrainzRecordingId,
+    metadata: {
+      ...best.candidate,
+      catalogVerification: {
+        source: 'musicbrainz',
+        safe: best.verification.safe,
+        repairCandidate: best.repairCandidate,
+        confidence: best.verification.confidence,
+        verifiedFields: best.verification.verifiedFields,
+      },
+    },
+  }
 }
 
 export async function fetchCoverArtArchive (

@@ -2,6 +2,7 @@ import { format_time } from '../../screen/0-common.js'
 import HTMLTypingLine from '../../typing/dom/htmltypingline.js'
 import { nextPlayableTypingKey } from '../../typing/typing-text.js'
 import DemoPlayer from '../demo-player.js'
+import AssistPlayer from '../assist-player.js'
 import {
   songLeadInDuration,
   waitForResultReveal,
@@ -13,6 +14,7 @@ export default class SongController {
     this.in_screen = false
 
     this.demo_player = null
+    this.assist_player = null
     this.auto_paused = false
 
     this.animation_frame_id = null
@@ -33,11 +35,18 @@ export default class SongController {
     this.game.song_screen.setKeyEffectsEnabled(
       this.game.preferences.keyEffectsEnabled,
     )
+    if (this.game.game_mode === 'assist') {
+      this.assist_player = new AssistPlayer(this.game.typing, this, {
+        language: this.game.songs.current_song?.language,
+      })
+    }
     this.game.song_screen.beginKeyEffects(
-      ['normal', 'easy', 'tempo', 'auto'].includes(this.game.game_mode)
+      ['normal', 'easy', 'tempo', 'auto', 'assist'].includes(this.game.game_mode)
         ? this.game.typing.lines.map((line, id) => ({
             id,
-            text: line.getRemainingText(),
+            text: this.assist_player
+              ? this.assist_player.lineEffectText(id)
+              : line.getRemainingText(),
             startTime: line.start_time,
             endTime: line.end_time,
           }))
@@ -144,7 +153,11 @@ export default class SongController {
             if (target) this.type(target, { displayKey: key })
           }
         } else {
-          this.type(key)
+          if (this.game.game_mode === 'assist') {
+            this.assist_player?.type(key)
+          } else {
+            this.type(key)
+          }
         }
       }
     }
@@ -171,6 +184,7 @@ export default class SongController {
       this.demo_player.stop()
       this.demo_player = null
     }
+    this.assist_player = null
     this.game.score.finish(this.game.media.getCurrentTime())
 
     return this.game.result_controller
@@ -179,13 +193,22 @@ export default class SongController {
   type (key, {
     displayKey = key,
     showFeedback = true,
+    playSound = true,
+    updateDisplay = true,
+    finishLine = true,
+    recordScore = true,
+    feedbackKind = 'player',
+    forceReject = false,
+    inputTime = null,
   } = {}) {
     // Try to process input key
     const lineId = this.game.typing.current_line
-    const accept = this.current_line.accept(key)
+    const accept = forceReject ? -1 : this.current_line.accept(key)
 
-    const currentTime = this.game.media.getCurrentTime()
-    this.game.score.onType(currentTime, accept)
+    const currentTime = inputTime === null
+      ? this.game.media.getCurrentTime()
+      : inputTime
+    if (recordScore) this.game.score.onType(currentTime, accept)
     let keyFeedback = null
     if (showFeedback) {
       keyFeedback = this.game.song_screen.showKeyFeedback(
@@ -195,15 +218,16 @@ export default class SongController {
           lineId,
           remainingText: this.current_line.getRemainingText(),
           currentTime,
+          kind: feedbackKind,
         },
       )
     }
-    this.updateTypingLine()
+    if (updateDisplay) this.updateTypingLine()
 
     // Play sfx
-    if (accept < 0) {
+    if (playSound && accept < 0) {
       this.game.sfx.play('error')
-    } else {
+    } else if (playSound) {
       this.game.sfx.play('key', { volume: 0.36 })
       if (
         Number(keyFeedback?.streak || 0) >= 25 &&
@@ -214,17 +238,21 @@ export default class SongController {
     }
 
     // If line is completed
-    if (this.current_line.isCompleted()) {
+    if (finishLine && this.current_line.isCompleted()) {
       this.game.score.onLineEnd(0, currentTime)
       this.triggerTypingChange()
     }
+    return accept
   }
 
   updateTypingLine () {
     // This update the typing text at the bottom of the screen
     // Blind mode only shows 1 char, blank mode shows nothing.
     if (this.current_line && this.game.game_mode !== 'blank') {
-      this.game.song_screen.setTypingText(this.current_line.getRemainingText(), this.game.game_mode === 'blind')
+      const text = this.game.game_mode === 'assist' && this.assist_player
+        ? this.assist_player.requiredText()
+        : this.current_line.getRemainingText()
+      this.game.song_screen.setTypingText(text, this.game.game_mode === 'blind')
     } else {
       this.game.song_screen.setTypingText('')
     }
@@ -250,6 +278,7 @@ export default class SongController {
         }
       }
       current_line.makeActive()
+      this.assist_player?.syncLine()
       this.updateTypingLine()
     } else if (next_line) {
       // Show the next line preview if the line is completed
@@ -273,8 +302,17 @@ export default class SongController {
     try {
       callback()
     } catch (error) {
-      this.optional_frame_failures.add(name)
-      console.error(`Disabled optional song effect after a runtime error: ${name}`, error)
+      // Demo input is retried on the next frame; a transient failure must not
+      // disable auto mode for the remainder of the song.
+      if (name !== 'demo') {
+        this.optional_frame_failures.add(name)
+        console.error('Disabled optional song effect after a runtime error:', name, error)
+      } else {
+        this.demo_frame_failures = (this.demo_frame_failures || 0) + 1
+        if (this.demo_frame_failures <= 3 || this.demo_frame_failures % 120 === 0) {
+          console.error('Recovered demo input from a runtime error', error)
+        }
+      }
       if (name === 'keyfall') {
         try {
           this.game.song_screen.endKeyEffects()
@@ -351,19 +389,29 @@ export default class SongController {
         const left_percent =  (1 - (current_line.getLeftoverCharCount() / current_line.getCharacterCount()))
         this.game.media.skipTo(current_line.start_time + left_percent * (current_line.end_time - current_line.start_time))
       } else {
-        const transitions = this.game.typing.advanceTo(current_time)
+        if (
+          this.assist_player &&
+          current_line &&
+          current_time > current_line.end_time &&
+          !current_line.isCompleted()
+        ) {
+          this.assist_player.finishExpiredLine(this.game.typing.current_line)
+        }
         let skipped = false
-        for (const transition of transitions) {
+        const processTransition = (transition) => {
+          const leftover = this.assist_player
+            ? this.assist_player.takeMissed(transition.lineId)
+            : transition.leftover
           this.runOptionalFramePart('keyfall', () => {
             this.game.song_screen.finishKeyEffectLine(
               transition.lineId,
               current_time,
-              transition.leftover > 0,
+              leftover > 0,
             )
           })
-          if (transition.leftover > 0) {
+          if (leftover > 0) {
             this.game.score.onLineEnd(
-              transition.leftover,
+              leftover,
               transition.endTime,
             )
             skipped = true
@@ -371,11 +419,36 @@ export default class SongController {
           // TypingMania NEO starts the next scoring window at the frame that
           // actually observed the transition. Keeping that clock preserves
           // score comparability when a delayed frame crosses several lines.
-          this.game.score.onLineStart(current_time)
+          // Auto input uses per-key scheduled timestamps. Start the next
+          // scoring window at the transition boundary so a delayed frame
+          // cannot make the following scheduled key go backwards in time.
+          this.game.score.onLineStart(
+            this.demo_player ? transition.endTime : current_time,
+          )
+        }
+        let transitions = []
+        if (this.demo_player) {
+          // A delayed frame must finish each auto line before advancing it.
+          let guard = 0
+          while (guard++ <= this.game.typing.lines.length) {
+            const active = this.game.typing.getCurrentLine()
+            if (!active || current_time <= active.end_time) break
+            if (!active.isCompleted()) this.demo_player.update(current_time)
+            if (!active.isCompleted()) break
+            const transition = this.game.typing.advanceTo(current_time, 1)
+            if (!transition.length) break
+            processTransition(transition[0])
+            transitions.push(transition[0])
+            this.triggerTypingChange()
+            this.demo_player.update(current_time)
+          }
+        } else {
+          transitions = this.game.typing.advanceTo(current_time)
+          for (const transition of transitions) processTransition(transition)
         }
         if (transitions.length) {
           if (skipped) this.game.sfx.play('skip')
-          this.triggerTypingChange()
+          if (!this.demo_player) this.triggerTypingChange()
         }
       }
 

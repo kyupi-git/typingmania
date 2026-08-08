@@ -1,7 +1,9 @@
 import fs from 'fs/promises'
 
 import PackedFile from '../../src/lib/packedfile.js'
-import { ORIGINAL_ARTIST_VERSION } from './original-artist.js'
+import {
+  ORIGINAL_ARTIST_VERSION,
+} from './original-artist.js'
 
 function exactArrayBuffer (buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
@@ -10,6 +12,7 @@ function exactArrayBuffer (buffer) {
 export function artistResolutionSourceInfo (resolution) {
   return {
     version: ORIGINAL_ARTIST_VERSION,
+    status: resolution?.resolved === true ? 'verified' : 'pending',
     resolved: Boolean(resolution?.resolved),
     checked_at: resolution?.checkedAt || new Date().toISOString(),
     artists: (resolution?.artists || []).map(artist => ({
@@ -20,6 +23,7 @@ export function artistResolutionSourceInfo (resolution) {
       resolved: Boolean(artist.resolved),
       source: artist.source || '',
       confidence: Number(artist.confidence) || 0,
+      status: artist.resolved === true ? 'verified' : 'pending',
     })),
   }
 }

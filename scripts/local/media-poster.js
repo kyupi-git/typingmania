@@ -1,23 +1,21 @@
 import { Buffer } from 'buffer'
 
 import {
+  bangumiImageCandidates,
+  fetchBangumiApiJson,
+  fetchBangumiWebsite,
+} from './bangumi-routes.js'
+import {
   fetchFirstAvailable,
   fetchWithTimeout,
 } from './network.js'
 
 export const POSTER_SELECTION_VERSION = 2
 
-const BANGUMI_WEBSITE_ORIGINS = [
-  'https://bgm.tv',
-  'https://bangumi.tv',
-  'https://chii.in',
-]
 const BANGUMI_SUBJECT_PAGE = subjectId =>
   `https://bgm.tv/subject/${encodeURIComponent(subjectId)}`
 const BANGUMI_SUBJECT_API = subjectId =>
   `https://api.bgm.tv/v0/subjects/${encodeURIComponent(subjectId)}`
-const BANGUMI_SUBJECT_IMAGE_API = subjectId =>
-  `${BANGUMI_SUBJECT_API(subjectId)}/image?type=large`
 
 class PosterIdentityMismatchError extends Error {
   constructor (expected, actual) {
@@ -161,7 +159,7 @@ function bangumiSubjectId (origin) {
 function externalPosterUrl (origin) {
   const catalog = String(origin?.catalog || '').toLocaleLowerCase()
   const value = String(origin?.poster_url || '')
-  if (!['anilist', 'tvmaze', 'tmdb', 'wikidata'].includes(catalog)) return ''
+  if (!['anilist', 'tvmaze', 'tmdb', 'wikidata', 'vndb'].includes(catalog)) return ''
   try {
     const url = new URL(value)
     const validHost = catalog === 'tvmaze'
@@ -170,7 +168,9 @@ function externalPosterUrl (origin) {
         ? url.hostname === 's4.anilist.co'
         : catalog === 'tmdb'
           ? url.hostname === 'image.tmdb.org'
-          : /(?:^|\.)wikimedia\.org$/iu.test(url.hostname)
+          : catalog === 'vndb'
+            ? /(?:^|\.)vndb\.org$/iu.test(url.hostname)
+            : /(?:^|\.)wikimedia\.org$/iu.test(url.hostname)
     return url.protocol === 'https:' && validHost ? url.href : ''
   } catch {
     return ''
@@ -187,7 +187,7 @@ async function fetchExternalCatalogPoster ({
   const response = await fetchWithTimeout(fetchImpl, imageUrl, {
     headers: {
       Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*;q=0.5',
-      'User-Agent': 'TypingManiaNovel/20260726 (verified poster lookup)',
+      'User-Agent': 'TypingManiaNovel/20260808 (verified poster lookup)',
     },
     redirect: 'follow',
   }, timeoutMs)
@@ -219,68 +219,21 @@ async function fetchSubjectReference ({
   timeoutMs,
 }) {
   const subjectId = bangumiSubjectId(origin)
-  let pageError = null
-  let pageReference = null
+  let apiError = null
   try {
-    const routes = BANGUMI_WEBSITE_ORIGINS.map(origin => (
-      `${origin}/subject/${encodeURIComponent(subjectId)}`
-    ))
-    const { response } = await fetchFirstAvailable(
+    const result = await fetchBangumiApiJson({
+      pathname: `/v0/subjects/${subjectId}`,
       fetchImpl,
-      routes,
-      {
+      options: {
         headers: {
-          Accept: 'text/html',
           'Cache-Control': 'no-cache',
-          'User-Agent': 'TypingManiaNovel/20260726 (verified poster lookup)',
-        },
-      },
-      {
-        timeoutMs: Math.min(timeoutMs, 3600),
-        perAttemptMs: 1200,
-      },
-    )
-    const reference = parseBangumiSubjectPage(await response.text(), subjectId)
-    pageReference = reference
-    if (reference.title && reference.imageUrl) {
-      if (!titlesMatch(origin.work_title, reference.title)) {
-        if (origin.title_scope !== 'direct-production') {
-          throw new PosterIdentityMismatchError(
-            origin.work_title,
-            reference.title,
-          )
-        }
-        pageError = new PosterIdentityMismatchError(
-          origin.work_title,
-          reference.title,
-        )
-      } else {
-        return reference
-      }
-    }
-    if (!pageError) {
-      pageError = new Error('Bangumi subject page has no usable cover')
-    }
-  } catch (error) {
-    if (error instanceof PosterIdentityMismatchError) throw error
-    pageError = error
-  }
-
-  try {
-    const response = await fetchWithTimeout(
-      fetchImpl,
-      BANGUMI_SUBJECT_API(subjectId),
-      {
-        headers: {
-          Accept: 'application/json',
-          'Cache-Control': 'no-cache',
-          'User-Agent': 'TypingManiaNovel/20260726 (verified poster lookup)',
         },
       },
       timeoutMs,
-    )
-    if (!response.ok) throw new Error(`Bangumi subject API ${response.status}`)
-    const subject = await response.json()
+      accept: value => String(value?.id || '') === String(subjectId),
+    })
+    const subject = result?.value
+    if (!subject) throw new Error('Bangumi subject API returned no subject')
     if (!subjectMatchesOrigin(origin, subject)) {
       throw new PosterIdentityMismatchError(
         origin.work_title,
@@ -291,20 +244,51 @@ async function fetchSubjectReference ({
       subject?.images?.large || subject?.images?.common,
       BANGUMI_SUBJECT_API(subjectId),
     )
-    const verifiedImageUrl = imageUrl || pageReference?.imageUrl || ''
-    if (!verifiedImageUrl) {
+    if (!imageUrl) {
       throw new Error('Bangumi subject API has no usable cover')
     }
     return {
       title: String(origin.work_title || ''),
-      imageUrl: verifiedImageUrl,
-      source: 'bangumi-subject-api',
+      imageUrl,
+      source: result.source === 'bangumi-api'
+        ? 'bangumi-subject-api'
+        : `bangumi-subject-api:${result.source}`,
     }
   } catch (error) {
     if (error instanceof PosterIdentityMismatchError) throw error
-    throw origin.title_scope === 'direct-production'
-      ? error
-      : pageError || error
+    apiError = error
+  }
+
+  try {
+    const result = await fetchBangumiWebsite({
+      pathname: `/subject/${encodeURIComponent(subjectId)}`,
+      fetchImpl,
+      timeoutMs: Math.min(timeoutMs, 3600),
+      options: {
+        headers: {
+          Accept: 'text/html',
+          'Cache-Control': 'no-cache',
+          'User-Agent': 'TypingManiaNovel/20260808 (verified poster lookup)',
+        },
+      },
+    })
+    const reference = parseBangumiSubjectPage(
+      await result.value.text(),
+      subjectId,
+    )
+    if (!reference.title || !reference.imageUrl) {
+      throw new Error('Bangumi subject page has no usable cover')
+    }
+    if (!titlesMatch(origin.work_title, reference.title)) {
+      throw new PosterIdentityMismatchError(
+        origin.work_title,
+        reference.title,
+      )
+    }
+    return reference
+  } catch (error) {
+    if (error instanceof PosterIdentityMismatchError) throw error
+    throw apiError || error
   }
 }
 
@@ -322,21 +306,21 @@ export async function fetchAnimePoster ({
   })
   const { response } = await fetchFirstAvailable(
     fetchImpl,
-    [
-      reference.imageUrl,
-      BANGUMI_SUBJECT_IMAGE_API(subjectId),
-    ],
+    bangumiImageCandidates(reference.imageUrl, subjectId),
     {
       headers: {
         Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*;q=0.5',
         'Cache-Control': 'no-cache',
-        'User-Agent': 'TypingManiaNovel/20260726 (verified poster lookup)',
+        'User-Agent': 'TypingManiaNovel/20260808 (verified poster lookup)',
       },
       redirect: 'follow',
     },
     {
-      timeoutMs,
-      perAttemptMs: Math.max(1200, Math.ceil(timeoutMs / 2)),
+      timeoutMs: Math.max(6500, timeoutMs),
+      perAttemptMs: Math.max(
+        1200,
+        Math.min(2200, Math.ceil(timeoutMs / 3)),
+      ),
     },
   )
   if (response.status === 404) return null

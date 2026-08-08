@@ -20,19 +20,18 @@ test('official Bangumi subject image becomes a verified poster', async () => {
     origin,
     fetchImpl: async url => {
       calls++
-      if (calls === 1) {
-        expect(url).toBe('https://bgm.tv/subject/496276')
+      if (String(url).includes('/v0/subjects/496276')) {
+        expect(url).toBe('https://api.bgm.tv/v0/subjects/496276')
         return {
           ok: true,
           status: 200,
-          text: async () => `
-            <title>攻殻機動隊 THE GHOST IN THE SHELL | Bangumi</title>
-            <h1 class="nameSingle"><a href="/subject/496276">
-              攻殻機動隊 THE GHOST IN THE SHELL
-            </a></h1>
-            <a href="//lain.bgm.tv/pic/cover/l/test.jpg"
-              class="thickbox cover"><img class="cover"></a>
-          `,
+          json: async () => ({
+            id: 496276,
+            name: '攻殻機動隊 THE GHOST IN THE SHELL',
+            images: {
+              large: 'https://lain.bgm.tv/pic/cover/l/test.jpg',
+            },
+          }),
         }
       }
       expect(url).toBe('https://lain.bgm.tv/pic/cover/l/test.jpg')
@@ -137,17 +136,15 @@ test('resolver caches a poster and skips gracefully after repeated network failu
   const successful = new MediaPosterResolver({
     fetchImpl: async url => {
       calls++
-      if (String(url).includes('/subject/496276')) {
+      if (String(url).includes('/v0/subjects/496276')) {
         return {
           ok: true,
           status: 200,
-          text: async () => `
-            <h1 class="nameSingle"><a href="/subject/496276">
-              ${origin.work_title}
-            </a></h1>
-            <a href="https://img.test/poster.png"
-              class="thickbox cover"></a>
-          `,
+          json: async () => ({
+            id: 496276,
+            name: origin.work_title,
+            images: { large: 'https://img.test/poster.png' },
+          }),
         }
       }
       const png = new Uint8Array(512)
@@ -276,6 +273,32 @@ test('a verified Wikidata production poster accepts Wikimedia Commons', async ()
     poster: {
       catalog: 'wikidata',
       catalogId: 'Q42',
+      identityVerified: true,
+    },
+  })
+})
+
+test('a verified VNDB production poster accepts the official image host', async () => {
+  const jpeg = new Uint8Array(512)
+  jpeg.set([0xFF, 0xD8, 0xFF])
+  const resolver = new MediaPosterResolver({
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => 'image/jpeg' },
+      arrayBuffer: async () => jpeg.buffer,
+    }),
+  })
+  await expect(resolver.resolve({
+    catalog: 'vndb',
+    catalog_id: 'v123',
+    work_title: 'サンプルノベル',
+    poster_url: 'https://t.vndb.org/cv/12/12345.jpg',
+  })).resolves.toMatchObject({
+    checked: true,
+    poster: {
+      catalog: 'vndb',
+      catalogId: 'v123',
       identityVerified: true,
     },
   })

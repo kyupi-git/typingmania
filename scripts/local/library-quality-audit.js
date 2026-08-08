@@ -21,12 +21,26 @@ import {
   readPackedSongText,
 } from './packed-song-reader.js'
 import {
+  ORIGINAL_ARTIST_VERSION,
+  isLikelyArtistName,
   looksLocalizedArtistName,
 } from './original-artist.js'
+import {
+  assertOriginalLyricLayer,
+  PRONUNCIATION_QUALITY_VERSION,
+} from './pronunciation.js'
 import { normalizeLyricTimingWindows } from './timed-lyrics.js'
 
 const romanizer = new Romanizer(latinTable)
 const VALID_LANGUAGES = new Set(['EN', 'JA', 'JP', 'ZH', 'U'])
+const IMPORT_SERVICES = new Set([
+  'applemusic',
+  'apple-music',
+  'local',
+  'local-files',
+  'netease',
+  'qqmusic',
+])
 const EXPLICIT_READING = /^<<[\s\S]*>>\[([\s\S]*)\]$/u
 
 function normalizedLanguage (value) {
@@ -145,6 +159,15 @@ export function auditLyricContent (metadata, lyricsCsv) {
       `A ${removed.kind} row remains playable at ${removed.start} ms.`,
     ))
   }
+  try {
+    assertOriginalLyricLayer(metadata, lines)
+  } catch (error) {
+    issues.push(issue(
+      'error',
+      'translated-lyric-layer',
+      error?.message || 'The playable lyric layer is not the original lyric.',
+    ))
+  }
   lines.forEach((line, index) => {
     for (const found of validatePronunciation(line, language)) {
       issues.push({
@@ -214,7 +237,45 @@ export function auditLyricContent (metadata, lyricsCsv) {
   return { issues, lines, language, expectedCpm, expectedPeakCpm }
 }
 
-function auditMetadata (metadata, entries) {
+function hasTrustedOriginalArtistResolution (metadata) {
+  const source = metadata.source || {}
+  const resolution = source.artist_resolution
+  const artists = Array.isArray(resolution?.artists)
+    ? resolution.artists
+    : []
+  return (
+    Number(resolution?.version || 0) >= ORIGINAL_ARTIST_VERSION &&
+    resolution?.resolved === true &&
+    source.checks?.artist_original === true &&
+    artists.length > 0 &&
+    artists.every(artist => (
+      artist?.resolved === true &&
+      String(artist?.original_name || '').trim()
+    ))
+  )
+}
+
+function hasPendingOriginalArtistResolution (metadata) {
+  const resolution = metadata.source?.artist_resolution
+  return (
+    resolution?.status === 'pending' &&
+    resolution?.resolved === false &&
+    metadata.source?.checks?.artist_original === false
+  )
+}
+
+function looksLikeUnverifiedAllHanArtist (metadata) {
+  const language = normalizedLanguage(metadata.language)
+  return (
+    ['JA', 'JP', 'U'].includes(language) &&
+    /\p{Script=Han}/u.test(String(metadata.artist || '')) &&
+    !/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Latin}]/u.test(
+      String(metadata.artist || ''),
+    )
+  )
+}
+
+export function auditMetadata (metadata, entries) {
   const issues = []
   const language = normalizedLanguage(metadata.language)
   if (!String(metadata.title || '').trim()) {
@@ -227,6 +288,15 @@ function auditMetadata (metadata, entries) {
       `Language code ${metadata.language || '(empty)'} is not recognized.`,
     ))
   }
+  if (!String(metadata.artist || '').trim()) {
+    issues.push(issue('error', 'artist-missing', 'The artist name is empty.'))
+  } else if (!isLikelyArtistName(metadata.artist)) {
+    issues.push(issue(
+      'error',
+      'artist-invalid',
+      'The artist field contains a biography, copyright notice, or unknown artist value.',
+    ))
+  }
   const cleanedTitle = analyzeSongTitle(metadata.title, {
     language: metadata.language,
   }).title
@@ -237,9 +307,19 @@ function auditMetadata (metadata, entries) {
       `The display title should be “${cleanedTitle}”.`,
     ))
   }
-  if (looksLocalizedArtistName(metadata.artist, {
+  const trustedArtist = hasTrustedOriginalArtistResolution(metadata)
+  const localizedArtist = looksLocalizedArtistName(metadata.artist, {
     language: metadata.language,
-  })) {
+  }) || (looksLikeUnverifiedAllHanArtist(metadata) && !trustedArtist)
+  const explicitlyVerifiedArtist =
+    metadata.source?.artist_resolution?.status === 'verified'
+  if (localizedArtist && hasPendingOriginalArtistResolution(metadata)) {
+    issues.push(issue(
+      'warning',
+      'artist-original-pending',
+      'The visible artist name may be localized; original-name verification is pending.',
+    ))
+  } else if (localizedArtist && (!trustedArtist || explicitlyVerifiedArtist)) {
     issues.push(issue(
       'error',
       'localized-artist-name-visible',
@@ -293,7 +373,7 @@ function auditMetadata (metadata, entries) {
     ))
   }
 
-  if (metadata.source?.service === 'qqmusic') {
+  if (IMPORT_SERVICES.has(metadata.source?.service)) {
     const quality = metadata.source?.quality || {}
     if (Number(quality.version || 0) < LYRIC_QUALITY_VERSION) {
       issues.push(issue(
@@ -307,6 +387,27 @@ function auditMetadata (metadata, entries) {
         'error',
         'display-only-lines-remain',
         `${quality.display_only_lines} line(s) are not playable.`,
+      ))
+    }
+    if (
+      ['JA', 'JP'].includes(language) &&
+      Number(quality.generated_pinyin_lines || 0) > 0
+    ) {
+      issues.push(issue(
+        'error',
+        'japanese-track-uses-generated-pinyin',
+        'A Japanese track contains generated Chinese pinyin.',
+      ))
+    }
+    if (
+      ['JA', 'JP'].includes(language) &&
+      Number(quality.pronunciation_version || 0) <
+        PRONUNCIATION_QUALITY_VERSION
+    ) {
+      issues.push(issue(
+        'warning',
+        'pronunciation-quality-version-is-stale',
+        `Stored pronunciation version ${quality.pronunciation_version || 0}.`,
       ))
     }
   }

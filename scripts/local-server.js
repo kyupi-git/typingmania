@@ -21,6 +21,14 @@ import {
   musicImportProviderIds,
 } from './local/music-import-providers.js'
 import { refreshImportedLibraryMetadata } from './local/library-metadata-maintenance.js'
+import {
+  loadNetworkSettings,
+  networkDiagnosticsSnapshot,
+  refreshNetworkRegionFromProxy,
+  saveNetworkProxy,
+  saveNetworkRegion,
+  startNetworkPreflight,
+} from './local/network-diagnostics.js'
 import { resetLibraryScope } from './local/library-reset.js'
 import {
   createUploadSession,
@@ -32,7 +40,10 @@ import { refreshImportedLyricsAndPace } from './local/lyrics-maintenance.js'
 import {
   refreshOutdatedMediaPosters,
 } from './local/poster-maintenance.js'
-import { hideUnverifiedLocalizedArtistNames } from './local/artist-maintenance.js'
+import {
+  hideUnverifiedLocalizedArtistNames,
+  refreshImportedArtistNames,
+} from './local/artist-maintenance.js'
 import { refreshMissingSongOrigins } from './local/song-origin-maintenance.js'
 import { refreshQQMusicSongTitles } from './local/song-title-maintenance.js'
 import { readPackedSongArtwork } from './local/packed-song-reader.js'
@@ -49,6 +60,8 @@ const HOST = '127.0.0.1'
 const SESSION_TOKEN = crypto.randomBytes(24).toString('base64url')
 const INSTANCE_PROTOCOL = 3
 const SERVER_STARTED_AT = new Date().toISOString()
+
+await loadNetworkSettings(ROOT)
 
 function latestServerSourceVersion () {
   const files = [fileURLToPath(import.meta.url)]
@@ -490,6 +503,7 @@ async function handleApi (request, response, url) {
           'metadata-refresh',
           'music-import-providers',
           'music-video-cache',
+          'network-diagnostics',
           'scoped-library-reset',
           'song-artwork-preview',
           'startup-readiness',
@@ -510,6 +524,65 @@ async function handleApi (request, response, url) {
         metadata: metadataMaintenanceRunning,
       },
     })
+  }
+  if (request.method === 'GET' && pathname === '/api/network/status') {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    return sendJson(response, 200, {
+      ...networkDiagnosticsSnapshot(),
+      jobs: {
+        import: {
+          state: importJob.state,
+          provider: importJob.provider,
+          error: importJob.error,
+          failures: importJob.result?.failures || [],
+        },
+        metadata: {
+          state: metadataRefreshJob.state,
+          error: metadataRefreshJob.error,
+          failures: metadataRefreshJob.result?.failures || [],
+        },
+      },
+    })
+  }
+  if (request.method === 'POST' && pathname === '/api/network/check') {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    return sendJson(response, 200, await startNetworkPreflight())
+  }
+  if (request.method === 'PUT' && pathname === '/api/network/region') {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    try {
+      const body = await readJsonBody(request)
+      await saveNetworkRegion(ROOT, body.region)
+      return sendJson(response, 200, networkDiagnosticsSnapshot())
+    } catch (error) {
+      return sendJson(response, 400, {
+        code: error.code || 'NETWORK_REGION_UPDATE_FAILED',
+        error: error.message,
+      })
+    }
+  }
+  if (request.method === 'PUT' && pathname === '/api/network/proxy') {
+    if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
+    try {
+      const body = await readJsonBody(request)
+      const settings = await saveNetworkProxy(ROOT, body)
+      await refreshNetworkRegionFromProxy({ timeoutMs: 1600 })
+      void startNetworkPreflight({
+        restart: true,
+        detectEgress: false,
+      }).catch(error => {
+        console.warn(`Network route preflight failed: ${error.message}`)
+      })
+      return sendJson(response, 200, {
+        ...settings,
+        ...networkDiagnosticsSnapshot(),
+      })
+    } catch (error) {
+      return sendJson(response, 400, {
+        code: error.code || 'NETWORK_PROXY_UPDATE_FAILED',
+        error: error.message,
+      })
+    }
   }
   if (request.method === 'GET' && pathname === '/api/qqmusic/import/status') {
     if (!authorized(request)) return sendJson(response, 403, { error: 'Forbidden' })
@@ -823,6 +896,13 @@ async function prepareLocalLibrary () {
 async function maintainLocalLibrary () {
   startupBackgroundRunning = true
   try {
+    const artistMaintenance = await refreshImportedArtistNames({
+      root: ROOT,
+      onProgress: progress => {
+        console.log(`Original artist names: ${progress.inspected}/${progress.total}`)
+      },
+    })
+    if (artistMaintenance.refreshed) await refreshLibrary()
     const artistCleanup = await hideUnverifiedLocalizedArtistNames({
       root: ROOT,
       onProgress: progress => {
@@ -901,6 +981,7 @@ async function maintainLocalLibrary () {
       await refreshLibrary()
     }
     return {
+      artistMaintenance,
       titleMaintenance,
       lyricsMaintenance,
       originMaintenance,
@@ -915,6 +996,9 @@ async function maintainLocalLibrary () {
 server.listen(PORT, HOST, () => {
   const url = `http://${HOST}:${PORT}/`
   console.log(`TypingManiaNovel local server: ${url}`)
+  void startNetworkPreflight().catch(error => {
+    console.warn(`Network route preflight failed: ${error.message}`)
+  })
   startupMaintenance = prepareLocalLibrary().then(() => {
     console.log(
       `Library: ${libraryStatus.songs} song(s), ` +

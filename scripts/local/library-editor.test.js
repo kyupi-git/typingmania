@@ -9,10 +9,99 @@ import PackedFile from '../../src/lib/packedfile.js'
 import {
   deleteLibrarySongs,
   inspectEditableLibrary,
+  songCompleteness,
 } from './library-editor.js'
 import { scanSongLibrary } from './library.js'
 
 globalThis.TextEncoder = TextEncoder
+
+test('song completeness distinguishes embedded fallbacks from verified assets', () => {
+  const complete = songCompleteness({
+    title: 'Song',
+    artist: 'Artist',
+    image: 'cover.jpg',
+    poster: 'poster.jpg',
+    origin: {
+      work_title: '作品原名',
+      original_verified: true,
+      catalog: 'bangumi',
+      catalog_id: '1',
+    },
+    source: {
+      lyrics_fingerprint: 'lyrics',
+      pronunciation_fingerprint: 'reading',
+      checks: {
+        metadata: true,
+        lyrics_timed: true,
+        pronunciation_complete: true,
+        poster_online: true,
+        cover_online: true,
+      },
+      quality: { playable_lines: 8 },
+    },
+  })
+  expect(complete).toMatchObject({ complete: true, score: 6, total: 6 })
+  expect(complete.pronunciationStatus).toBe('verified')
+  expect(songCompleteness({
+    title: 'Song',
+    artist: 'Artist',
+    image: 'embedded.jpg',
+    source: { checks: { metadata: true } },
+  })).toMatchObject({ album: false, origin: false, complete: false })
+})
+
+test('pending pronunciation remains incomplete despite a fingerprint', () => {
+  const result = songCompleteness({
+    title: 'Song',
+    artist: 'Artist',
+    source: {
+      pronunciation_fingerprint: 'reading',
+      quality: { pronunciation_status: 'pending' },
+      checks: { pronunciation_complete: true },
+    },
+  })
+  expect(result).toMatchObject({
+    pronunciationStatus: 'pending',
+    pronunciation: false,
+    complete: false,
+  })
+})
+
+test('pending artist fallback is incomplete while verified artist is authoritative', () => {
+  const pending = songCompleteness({
+    title: 'Song',
+    artist: '楠木灯',
+    source: {
+      service: 'qqmusic',
+      artist_resolution: {
+        version: 8,
+        status: 'pending',
+        resolved: false,
+      },
+      checks: { metadata: true },
+    },
+  })
+  expect(pending).toMatchObject({
+    artistStatus: 'pending',
+    identity: false,
+    complete: false,
+  })
+
+  const verified = songCompleteness({
+    title: 'Song',
+    artist: '楠木ともり',
+    source: {
+      service: 'qqmusic',
+      artist_resolution: {
+        version: 8,
+        status: 'verified',
+        resolved: true,
+      },
+      checks: { metadata: true },
+    },
+  })
+  expect(verified).toMatchObject({ artistStatus: 'verified', identity: true })
+})
 
 async function writeSong (filename, {
   title,

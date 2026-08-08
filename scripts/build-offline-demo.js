@@ -3,7 +3,10 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 
 import PackedFile from '../src/lib/packedfile.js'
-import { buildSongLyrics } from '../src/util/song-meta.js'
+import {
+  buildSongLyrics,
+  estimateAssistReferencePace,
+} from '../src/util/song-meta.js'
 import { filterLyricLines } from './local/lyrics-quality.js'
 import { generateChinesePinyin } from './local/pronunciation.js'
 
@@ -268,7 +271,7 @@ function makeCover (demo) {
 </svg>`.trim()
 }
 
-function songMetadata (demo, cpm, maxCpm) {
+function songMetadata (demo, cpm, maxCpm, assistPace) {
   return {
     title: demo.title,
     subtitle: demo.subtitle,
@@ -280,6 +283,8 @@ function songMetadata (demo, cpm, maxCpm) {
     duration,
     cpm,
     max_cpm: maxCpm,
+    assist_cpm: assistPace.averageCpm,
+    assist_max_cpm: assistPace.peakCpm,
     image: 'cover.svg',
     audio: demo.audio,
     source: {
@@ -299,12 +304,22 @@ async function buildDemo (root, demo, wave) {
   const [lyricsCsv, cpm, maxCpm] = buildSongLyrics(lyrics, {
     durationMs: duration * 1000,
   })
+  const assistPace = estimateAssistReferencePace(
+    lyricsCsv,
+    demo.language,
+    { durationMs: duration * 1000 },
+  )
   const encoder = new TextEncoder()
   const packed = new PackedFile()
   try {
     packed.addFile(
       'song.json',
-      encoder.encode(JSON.stringify(songMetadata(demo, cpm, maxCpm))),
+      encoder.encode(JSON.stringify(songMetadata(
+        demo,
+        cpm,
+        maxCpm,
+        assistPace,
+      ))),
     )
     packed.addFile('lyrics.csv', encoder.encode(lyricsCsv))
     packed.addFile('cover.svg', encoder.encode(makeCover(demo)))

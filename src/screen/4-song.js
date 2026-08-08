@@ -15,7 +15,8 @@ export default class SongScreen extends Screen {
       this.keyfall_layer = Group(0, 0, 1920, 1080).layer(20),
 
       // Top Right Infobar
-      Box(1670, 0, 250, 60).fill(UIColor).layer(121),
+      // The whole shortcut and label sit inside this top bar in every locale.
+      Box(1628, 0, 292, 60).fill(UIColor).layer(121),
       this.abandon_key = Txt(1644, 18, 150, 24).layer(122).radius(5).fill(Black).stroke(BtnBorder).align(CENTER).font(UIFont.size(16)).color(White),
       this.abandon_label = Txt(1805, 15, 100, 30).layer(122).color(White).font(UIFont.size(20)).noOverflow(),
 

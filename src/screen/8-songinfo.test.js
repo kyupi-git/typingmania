@@ -18,9 +18,16 @@ test('song information uses a neutral marker instead of a language code', () => 
     duration: 120,
     cpm: 240,
     max_cpm: 360,
+    assist_cpm: 120,
+    assist_max_cpm: 180,
     high_score: 0,
   })
 
   expect(screen.song_marker.el.innerText).toBe('•')
   expect(screen.layer.el.textContent).not.toContain('JP')
+  expect(screen.song_cpm.el.innerText).toBe('240 / 360')
+
+  screen.updateGameMode('assist')
+  expect(screen.song_cpm.el.innerText).toBe('120 / 180')
+  expect(screen.high_score_label.el.innerText).toBe('Standard high score')
 })

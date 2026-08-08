@@ -3,16 +3,68 @@ import path from 'path'
 
 import { fetchWithRetry } from './network.js'
 
-export const ORIGINAL_ARTIST_VERSION = 3
+export const ORIGINAL_ARTIST_VERSION = 8
 
 const CACHE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000
 const NEGATIVE_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
-const ROLE_CREDIT = /(?:\bCV\s*[:：.]|\bfeat\.?\b|\bfeaturing\b|\bfrom\b|\bwith\b)/iu
+const ROLE_CREDIT = /(?:\bC\.?V\.?\s*[:：.]|\bfeat\.?\b|\bfeaturing\b|\bfrom\b|\bwith\b)/iu
+// Track rows occasionally contain a singer biography instead of the singer
+// field.  Treat these as invalid input; accepting them poisons both catalog
+// matching and work-title searches.
+const ARTIST_BIOGRAPHY = /(?:出生(?:于|地|日期)?|年出生|生于\s*\d{4}|职业\s*[:：]|简介\s*[:：]|歌手简介|代表作|音乐人简介|\bborn\s+(?:in|on)\b|\bborn\s*:\s*|\bborn\s+\d{4}\b|birthplace|occupation\s*[:：]|singer\s+bio|copyright|\b(?:all rights reserved|℗|©)\b|作词\s*[:：]|作曲\s*[:：]|编曲\s*[:：]|作詞\s*[:：]|作曲\s*[:：]|編曲\s*[:：])/iu
+
+export function isLikelyArtistName (value) {
+  const name = cleanName(value)
+  if (!name || ARTIST_BIOGRAPHY.test(name)) return false
+  return name.length <= 160 && !/^(?:未知|佚名|unknown|various artists|群星)$/iu.test(name)
+}
+
+// Split only at delimiters outside role-credit parentheses.  A role credit is
+// one semantic singer (character + CV), not two collaborating singers.
+export function splitArtistCredits (value) {
+  const text = cleanName(value)
+  const output = []
+  let start = 0
+  let depth = 0
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index]
+    if (character === '(' || character === '（') depth++
+    else if (character === ')' || character === '）') depth = Math.max(0, depth - 1)
+    const commaDelimiter = character === '、' || /[；;]/u.test(character)
+    const slashDelimiter = !depth && /\s\/\s/u.test(text.slice(index, index + 3))
+    if (!depth && (commaDelimiter || slashDelimiter)) {
+      const part = cleanName(text.slice(start, index))
+      if (isLikelyArtistName(part)) output.push(part)
+      start = commaDelimiter ? index + 1 : index + 3
+      if (start > text.length) start = text.length
+      if (start === index + 3) index += 2
+    }
+  }
+  const last = cleanName(text.slice(start))
+  if (isLikelyArtistName(last)) output.push(last)
+  return output
+}
+
+export function normalizeArtistCredits (values) {
+  const names = (Array.isArray(values) ? values : splitArtistCredits(values))
+    .map(value => cleanName(value)).filter(isLikelyArtistName)
+  const roleVoices = new Set()
+  for (const name of names) {
+    const match = name.match(/[（(]\s*C\.?V\.?\s*[.:：]?\s*([^）)]+)[）)]/iu)
+    if (match) roleVoices.add(comparable(match[1]))
+  }
+  return names.filter((name, index) => {
+    const key = comparable(name)
+    if (roleVoices.has(key) && !/[（(]\s*C\.?V\.?/iu.test(name)) return false
+    return true
+  }).filter((name, index, list) => list.findIndex(value => comparable(value) === comparable(name)) === index)
+}
 const LOCALIZED_BILINGUAL = /^[\p{Script=Han}\s·・]+[\(（][^\)）]*[A-Za-z\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}][^\)）]*[\)）]$/u
 // Only include simplified forms that differ from normal Japanese shinjitai.
 // Shared characters such as 国, 会, 気, 実, 戦, 図, 駅, and 読 are valid in
 // native Japanese names and must not make an artist look localized.
-const SIMPLIFIED_JAPANESE_FORMS = /[亚爱边滨仓处单岛东发广龟华纪乐丽龙门冈归树岁团盐应驿运战泽转阳乡濑宫樱线黑变读铁观]/u
+const SIMPLIFIED_JAPANESE_FORMS = /[亚爱边滨仓处单岛东发广龟华纪乐丽龙门冈归树岁团盐应驿运战泽转阳乡濑宫樱线黑变读铁观纯]/u
+const CHINESE_TRANSLATION_GRAMMAR = /(?:的|组合|樂團|乐团|少女組|少女组|偶像組合|偶像组合)/u
 const WIKI_ITEM = /<item>\s*<key><!\[CDATA\[([\s\S]*?)\]\]><\/key>\s*<value><!\[CDATA\[([\s\S]*?)\]\]><\/value>\s*<\/item>/gu
 const ORIGINAL_NAME_KEYS = [
   '原文名',
@@ -115,6 +167,12 @@ function candidateNameVariants (value, family) {
   return variants
 }
 
+function isJapaneseReadingOnly (value, family) {
+  return family === 'JP' &&
+    !/[\p{Script=Han}]/u.test(cleanName(value)) &&
+    /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(cleanName(value))
+}
+
 function leadingDescriptionName (detail, family) {
   const descriptions = [
     detail?.ex_info?.desc,
@@ -127,12 +185,58 @@ function leadingDescriptionName (detail, family) {
     if (
       candidate &&
       candidate.length <= 80 &&
+      isLikelyArtistName(candidate) &&
       hasNativeScript(candidate, family)
     ) {
       return candidate
     }
   }
   return ''
+}
+
+function detailNameMarksLocalizedAlias (rawName, detail, family) {
+  const raw = cleanName(rawName)
+  const detailName = cleanName(detail?.basic_info?.name)
+  if (!raw || !detailName || family === 'ZH') return false
+  const prefix = detailName.match(/^(.+?)\s*[\(（]([^\)）]+)[\)）]$/u)
+  if (!prefix || comparable(prefix[1]) !== comparable(raw)) return false
+  return (
+    comparable(prefix[2]) !== comparable(raw) &&
+    hasNativeScript(prefix[2], family) &&
+    !isJapaneseReadingOnly(prefix[2], family)
+  )
+}
+
+function trustworthyParentheticalPrimary (raw, family) {
+  const match = cleanName(raw).match(/^(.+?)\s*[\(（]([^\)）]+)[\)）]$/u)
+  if (!match) return ''
+  const primary = cleanName(match[1])
+  const annotation = cleanName(match[2])
+  if (family === 'JP' &&
+      /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(primary) &&
+      /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(annotation) &&
+      !/[\p{Script=Han}]/u.test(annotation) &&
+      !SIMPLIFIED_JAPANESE_FORMS.test(primary)) return primary
+  if (family === 'ZH' && /\p{Script=Han}/u.test(primary) && /[A-Za-z]/u.test(annotation)) return primary
+  if (family === 'EN' && /[A-Za-z]/u.test(primary) && /[\p{Script=Han}]/u.test(annotation)) return primary
+  if (family === 'KO' && /\p{Script=Hangul}/u.test(primary) && !/[\p{Script=Han}]/u.test(annotation)) return primary
+  return ''
+}
+
+export function needsOriginalNameDetail (artist) {
+  if (looksLocalizedArtistName(artist.name, {
+    language: artist.language,
+  })) return true
+  const family = normalizeLanguage(artist.language)
+  // A Japanese catalog frequently localizes an artist to an all-Han Chinese
+  // alias without any parenthetical marker (for example, 楠木灯). The compact
+  // track row cannot distinguish that alias from a legitimate Japanese Kanji
+  // name. Query the batched singer detail before declaring it original.
+  return (
+    ['JP', 'U'].includes(family) &&
+    /\p{Script=Han}/u.test(artist.name) &&
+    !/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(artist.name)
+  )
 }
 
 export function looksLocalizedArtistName (
@@ -146,6 +250,15 @@ export function looksLocalizedArtistName (
   if (!name || ROLE_CREDIT.test(name)) return false
   if (LOCALIZED_BILINGUAL.test(name)) return true
   const family = scriptFamilyForDetail(detail, language)
+  if (
+    family !== 'ZH' &&
+    /[A-Za-z]/u.test(name) &&
+    /\p{Script=Han}/u.test(name) &&
+    (
+      SIMPLIFIED_JAPANESE_FORMS.test(name) ||
+      CHINESE_TRANSLATION_GRAMMAR.test(name)
+    )
+  ) return true
   if (
     family === 'KO' &&
     /\p{Script=Han}/u.test(name) &&
@@ -176,6 +289,16 @@ export function originalArtistFromDetail ({
       confidence: 0,
     }
   }
+  if (!isLikelyArtistName(raw)) {
+    return {
+      singerMid,
+      rawName: raw,
+      originalName: '',
+      resolved: false,
+      source: 'invalid-artist-field',
+      confidence: 0,
+    }
+  }
   if (ROLE_CREDIT.test(raw)) {
     return {
       singerMid,
@@ -187,22 +310,54 @@ export function originalArtistFromDetail ({
     }
   }
 
-  const localized = looksLocalizedArtistName(raw, { language, detail })
   const family = scriptFamilyForDetail(detail, language)
+  const parentheticalPrimary = trustworthyParentheticalPrimary(raw, family)
+  if (parentheticalPrimary) {
+    return {
+      singerMid,
+      rawName: raw,
+      originalName: parentheticalPrimary,
+      resolved: true,
+      source: 'qqmusic-track-written-name',
+      confidence: 0.95,
+    }
+  }
+  // Keep the track language's localization signal even when singer detail
+  // supplies a different native family. Otherwise an unchanged provider alias
+  // can be accepted merely because detail says the singer is Japanese.
+  const localized = (
+    looksLocalizedArtistName(raw, { language }) ||
+    looksLocalizedArtistName(raw, { language, detail }) ||
+    detailNameMarksLocalizedAlias(raw, detail, family)
+  )
   const items = wikiItems(detail?.wiki)
   const candidates = []
+  const detailBasicName = cleanName(detail?.basic_info?.name)
+  const detailWrittenName = detailBasicName.replace(
+    /\s*[\(（][^\)）]+[\)）]\s*$/u,
+    '',
+  )
+  if (family !== 'JP' || /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(detailWrittenName)) {
+    for (const variant of candidateNameVariants(detailWrittenName, family)) {
+      candidates.push({ value: variant, source: 'qqmusic-singer-detail-name' })
+    }
+  }
+  // QQ Music's foreign_name is the catalog's canonical non-localized display
+  // field. Prefer it to a wiki reading such as くすのき ともり, which is
+  // pronunciation evidence but not necessarily the artist's written name.
+  const foreignName = cleanName(detail?.ex_info?.foreign_name)
+  for (const variant of candidateNameVariants(foreignName, family)) {
+    if (isJapaneseReadingOnly(variant, family) && /\p{Script=Han}/u.test(raw) && !localized) continue
+    candidates.push({
+      value: variant,
+      source: 'qqmusic-singer-foreign-name',
+    })
+  }
   for (const key of ORIGINAL_NAME_KEYS) {
     const value = cleanName(items.get(key))
     for (const variant of candidateNameVariants(value, family)) {
       candidates.push({ value: variant, source: `qqmusic-wiki-${key}` })
     }
-  }
-  const foreignName = cleanName(detail?.ex_info?.foreign_name)
-  for (const variant of candidateNameVariants(foreignName, family)) {
-    candidates.push({
-      value: variant,
-      source: 'qqmusic-singer-foreign-name',
-    })
   }
   const leadingName = leadingDescriptionName(detail, family)
   if (leadingName) {
@@ -306,6 +461,15 @@ function cacheIsFresh (entry) {
   return age >= 0 && age < maximumAge
 }
 
+function cacheEntryUsable (entry, artist) {
+  if (!cacheIsFresh(entry)) return false
+  if (!entry?.original_name) return true
+  return isLikelyArtistName(entry.original_name) &&
+    !looksLocalizedArtistName(entry.original_name, {
+      language: artist?.language,
+    })
+}
+
 function chunks (values, size) {
   const output = []
   for (let index = 0; index < values.length; index += size) {
@@ -360,10 +524,8 @@ export default class OriginalArtistResolver {
       .filter(artist => artist.name)
     let cacheChanged = false
     for (const artist of input) {
-      if (!artist.mid || cacheIsFresh(this.cache.entries[artist.mid])) continue
-      if (looksLocalizedArtistName(artist.name, {
-        language: artist.language,
-      })) continue
+      if (!artist.mid || cacheEntryUsable(this.cache.entries[artist.mid], artist)) continue
+      if (needsOriginalNameDetail(artist)) continue
       const resolution = originalArtistFromDetail({
         rawName: artist.name,
         language: artist.language,
@@ -382,10 +544,8 @@ export default class OriginalArtistResolver {
     const pending = [...new Set(input
       .filter(artist => (
         artist.mid &&
-        !cacheIsFresh(this.cache.entries[artist.mid]) &&
-        looksLocalizedArtistName(artist.name, {
-          language: artist.language,
-        })
+        !cacheEntryUsable(this.cache.entries[artist.mid], artist) &&
+        needsOriginalNameDetail(artist)
       ))
       .map(artist => artist.mid))]
     const details = new Map()
@@ -424,16 +584,18 @@ export default class OriginalArtistResolver {
         } catch (error) {
           this.lastNetworkError = error?.message || String(error)
           this.consecutiveNetworkFailures++
-          // The request already includes a bounded retry. Avoid repeating a
-          // regional outage for every artist in the same import batch.
-          if (this.consecutiveNetworkFailures >= 1) this.networkDisabled = true
+          // Each request is bounded, but one transient provider failure must
+          // not disable verification for every later artist in the batch.
+          // The short batch-level circuit breaker still avoids a long stall
+          // during a sustained regional outage.
+          if (this.consecutiveNetworkFailures >= 3) this.networkDisabled = true
         }
       }
     }
     if (cacheChanged) await this.save().catch(() => {})
 
     const resolvedArtists = input.map(artist => {
-      const entry = artist.mid && cacheIsFresh(this.cache.entries[artist.mid])
+      const entry = artist.mid && cacheEntryUsable(this.cache.entries[artist.mid], artist)
         ? this.cache.entries[artist.mid]
         : null
       if (entry) {
@@ -447,6 +609,17 @@ export default class OriginalArtistResolver {
           confidence: Number(entry.confidence) || 0,
         }
       }
+      if (needsOriginalNameDetail(artist) && !details.has(artist.mid)) {
+        return {
+          singerMid: artist.mid,
+          singerId: artist.id,
+          rawName: artist.name,
+          originalName: '',
+          resolved: false,
+          source: 'network-unavailable',
+          confidence: 0,
+        }
+      }
       return {
         ...originalArtistFromDetail({
           rawName: artist.name,
@@ -457,15 +630,19 @@ export default class OriginalArtistResolver {
         singerId: artist.id,
       }
     })
-    const originalNames = resolvedArtists
+    const originalNames = normalizeArtistCredits(resolvedArtists
       .map(artist => artist.originalName)
-      .filter(Boolean)
+      .filter(Boolean))
+    const kept = new Set(originalNames.map(name => comparable(name)))
+    const normalizedArtists = resolvedArtists.filter(artist => (
+      !artist.originalName || kept.has(comparable(artist.originalName))
+    ))
     return {
       version: ORIGINAL_ARTIST_VERSION,
       artist: originalNames.join(' / '),
       artistNames: originalNames,
-      rawArtistNames: input.map(artist => artist.name),
-      artists: resolvedArtists,
+      rawArtistNames: normalizedArtists.map(artist => artist.rawName),
+      artists: normalizedArtists,
       resolved: resolvedArtists.length > 0 &&
         resolvedArtists.every(artist => artist.resolved),
       checkedAt: new Date().toISOString(),

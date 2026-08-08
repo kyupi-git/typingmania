@@ -3,7 +3,7 @@
   "repository": "https://github.com/kyupi-git/typingmania",
   "description": "TypingManiaNovel is a multilingual song-lyrics typing game forked from TypingMania NEO.",
   "license": "Apache-2.0",
-  "version": "20260726.0.0",
+  "version": "20260808.0.0",
   "type": "module",
   "devDependencies": {
     "esbuild": "0.28.1",
@@ -28,13 +28,17 @@
     "build-assets": "node scripts/build-assets.js",
     "build-index": "node scripts/build-index.js",
     "build-song": "node scripts/build-song.js",
+    "check-docs": "node scripts/check-markdown-links.js",
+    "check-network": "node scripts/check-network-routes.js",
     "audit-public": "node scripts/audit-public-tree.js",
-    "check": "npm test && npm run build-game && npm run audit-library && npm run verify-runtime && npm run audit-public"
+    "check": "npm test && npm run build-game && npm run audit-library && npm run verify-runtime && npm run check-docs && npm run audit-public"
   },
   "dependencies": {
     "@clamber_l/crypto": "0.1.12",
+    "kuromoji": "0.1.2",
     "music-metadata": "11.14.0",
-    "pinyin-pro": "3.28.1"
+    "pinyin-pro": "3.28.1",
+    "undici": "6.28.0"
   },
   "jest": {
     "testEnvironment": "jsdom",

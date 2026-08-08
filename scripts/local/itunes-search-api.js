@@ -30,6 +30,8 @@ export function metadataFromItunesResult (result, fallback = {}) {
     duration: Number(result?.trackTimeMillis) / 1000 || 0,
     itunesTrackId: String(result?.trackId || ''),
     itunesCollectionId: String(result?.collectionId || ''),
+    albumPic: String(result?.artworkUrl100 || '')
+      .replace(/\/100x100(?:bb)?\./u, '/600x600bb.'),
   }
 }
 

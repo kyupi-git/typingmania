@@ -1,14 +1,48 @@
 const CJK_CREDIT_PREFIX = /^(?:(?:作詞・作曲|作詞作曲|作词作曲|詞曲|词曲|作詞|作词|作曲|作編曲|作编曲|編曲|编曲|詞|词|曲|填詞|填词|譜曲|谱曲|監修|监制|監製|制作人|製作人|プロデュース|歌手|原唱|演唱|歌唱|歌|唄|和聲|和声|録音|录音|錄音|混音|母帶|母带|吉他|ギター|貝斯|贝斯|ベース|鼓|ドラム|鍵盤|键盘|キーボード|弦樂|弦乐|翻譯|翻译|譯|译|發行|发行|出品|版權|版权)(?:\s*(?:[・/&、,+]|and)\s*(?:作詞|作词|作曲|作編曲|作编曲|編曲|编曲|詞|词|曲|填詞|填词|譜曲|谱曲|監修|监制|監製|制作人|製作人|歌|唄))*)(?:\s*[:：∶]|\s+)/iu
 const ENGLISH_CREDIT_PREFIX = /^(?:(?:lyrics?|words|music|compos(?:ed|er|ition)|written|songwrit(?:er|ing)|arrang(?:ed|er|ement)|produc(?:ed|er|tion)|perform(?:ed|er)|vocals?|mix(?:ed|er|ing)|master(?:ed|ing)|record(?:ed|ing)|publish(?:ed|er)|translation|translated)(?:\s*(?:&|and|\/|\+)\s*(?:lyrics?|words|music|compos(?:ed|er|ition)|written|songwrit(?:er|ing)|arrang(?:ed|er|ement)|produc(?:ed|er|tion)))?\s*(?:(?:by|from)\s*[:：]?|[:：]))/iu
-const COPYRIGHT_PREFIX = /^(?:©|℗|copyright\b|all rights reserved\b|未經許可|未经许可|本歌曲来自|本歌曲來自|qq音乐|qq音樂)/iu
+// Copyright/provider notices are filtered only when the row has an explicit
+// rights declaration.  Do not match isolated words such as "right", "使用",
+// or "配信", which can all occur in ordinary lyrics.
+const COPYRIGHT_NOTICE = new RegExp(String.raw`^(?:
+  (?:©|℗)\s*(?:\d{4}\s*)?(?:copyright\b|all\s+rights?\s+reserved\b|著作権|著作權|版权|版權)?
+  |copyright\b.*(?:all\s+rights?\s+reserved\b|(?:reproduc|cop(?:y|ies)|distribut|broadcast|publish|use)\w*\s+(?:prohibit|forbidden|not\s+allowed|without\s+permission))
+  |all\s+rights?\s+reserved\b
+  |(?=[^。！？!?]{0,120}(?:未经|未經|無|无)?(?:著作权人|著作權人|版权方|版權方|许可|許可|授权|授權))(?=[^。！？!?]{0,120}(?:翻唱|翻录|翻錄|复制|複製|转载|轉載|传播|傳播|发行|發行|上传|上傳|使用|配信|配布|禁止|不得|严禁|嚴禁|请勿|請勿))[^。！？!?]{2,160}(?:禁止|不得|严禁|嚴禁|请勿|請勿|未经|未經|无权|無權|许可|許可|授权|授權)[^。！？!?]{0,160}
+  |(?:無断|无断|未經許可|未经许可|著作権者?の許諾なく|著作権者?の許可なく|著作權者?未經授權)[^。！？!?]{0,120}(?:転載|轉載|複製|复制|使用|配信|配布|放送|broadcast|reproduc|禁止|不得|厳禁|严禁)
+  |(?:転載|轉載|複製|复制|配信|配布|放送)[^。！？!?]{0,80}(?:禁止|厳禁|严禁|無断|无断|未经许可|未經許可)
+  |(?=[^.!?\n]{0,160}(?:unauthori[sz]ed|without\s+(?:the\s+)?(?:written\s+)?permission|without\s+permission))(?=[^.!?\n]{0,160}(?:reproduc|cop(?:y|ies)|distribut|upload|broadcast|transmit|publish|use)\w*)[^.!?\n]{2,240}(?:prohibit|forbidden|not\s+allowed|not\s+permitted|without\s+permission|unauthori[sz]ed)[^.!?\n]{0,120}
+  |(?:無断転載禁止|無断複製禁止|無断使用禁止|無断配信禁止|転載禁止|複製禁止|配信禁止|配布禁止|放送禁止|著作権(?:者)?の(?:許諾|許可)なく[^。！？!?]{0,100}(?:転載|複製|使用|配信|配布|放送)|許可なく[^。！？!?]{0,100}(?:転載|複製|使用|配信|配布|放送))
+  |本(?:作|作品|歌曲|歌曲內容|歌曲内容)?(?:未经|未經)(?:著作权人|著作權人|版权方|版權方)?(?:许可|許可|授权|授權)[^。！？!?]{0,100}(?:翻唱|翻录|翻錄|复制|複製|使用|转载|轉載|传播|傳播|禁止|不得)
+  |(?:本歌曲来自|本歌曲來自|qq音乐|qq音樂)
+)`.replace(/\s*\r?\n\s*/gu, ''), 'iu')
 const ROMANIZED_CREDIT_PREFIX = /^(?:shi|xi|sakushi|kyoku|kiyoku|sakkyoku|henkyoku|henkiyoku|seisakujin)\s*[:：]/iu
+const STRUCTURED_CREDIT_LABEL = /^(?:(?:和声(?:编写|編写)?|人声编辑|人聲編輯|混音(?:工程师|工程師)?|母带(?:工程师|工程師)?|母帶(?:工程師)?|音乐(?:总监|统筹|統籌|监督)|音[樂楽](?:總監|总监|統筹|統籌|総監督|監督|統括)|制作助理|製作助理|统筹|統籌|封面|总企划|總企劃|OP|PGM|music\s+director|music\s+coordinator|production\s+assistant|cover|mastering\s+engineer|mixing\s+engineer)\s*[/／&、,，+和与]\s*)?(?:和声(?:编写|編写)?|人声编辑|人聲編輯|混音(?:工程师|工程師)?|母带(?:工程师|工程師)?|母帶(?:工程師)?|音乐(?:总监|统筹|統籌|监督)|音[樂楽](?:總監|总监|統筹|統籌|総監督|監督|統括)|制作助理|製作助理|统筹|統籌|封面|总企划|總企劃|OP|PGM|music\s+director|music\s+coordinator|production\s+assistant|cover|mastering\s+engineer|mixing\s+engineer)\s*[:：]/iu
+const SPEAKER_LABEL = /^([\p{L}\p{N}][\p{L}\p{N} ._'’·・-]{0,30})\s*[/／&、,，+和与]\s*([\p{L}\p{N}][\p{L}\p{N} ._'’·・-]{0,30})\s*[:：]/u
+const SINGLE_SPEAKER_LABEL = /^([\p{L}\p{N}][\p{L}\p{N} ._'’·・-]{0,24})\s*[:：]/u
 const LRC_METADATA = /^\[(?:ar|al|ti|by|offset|kana|language|re|ve):/iu
 const SECTION_HEADER = /^(?:[\[【(（]\s*)?(?:verse|chorus|pre[\s-]?chorus|bridge|intro|outro|hook|refrain|interlude|instrumental|rap|spoken|主歌|副歌|前奏|间奏|間奏|尾奏|サビ|[ABC]メロ)(?:\s*\d+)?\s*(?:[\]】)）]|[:：])?$/iu
 const NON_VOCAL_PLACEHOLDER =
   /^(?:纯音乐(?:[，,]?请欣赏)?|純音樂(?:[，,]?請欣賞)?|纯音乐无歌词|純音楽|暂无歌词|暫無歌詞|该歌曲暂无歌词|該歌曲暫無歌詞|此歌曲为没有填词的纯音乐|此歌曲為沒有填詞的純音樂|无歌词|無歌詞|歌詞なし|インスト(?:ゥ?ルメンタル)?|inst(?:rumental)?\.?|instrumental music|no lyrics|music only|background music|bgm)$/iu
 const NON_VOCAL_TITLE =
   /(?:^|[\s([（【._-])(?:inst(?:rumental)?\.?|karaoke|off(?:[\s-]+main)?[\s-]?vocal|backing track|伴奏|纯音乐|純音樂|純音楽|カラオケ|インスト(?:ゥ?ルメンタル)?|bgm)(?:$|[\s)\]）】._-])/iu
-export const LYRIC_QUALITY_VERSION = 10
+export const LYRIC_QUALITY_VERSION = 14
+
+export function normalizeExplicitPronunciation (lyric, language = '') {
+  const value = String(lyric || '')
+  const match = value.match(/^(<<[\s\S]*>>)[\[]([\s\S]*)\]$/u)
+  if (!match) return value
+  let normalized = match[2]
+    .replace(/[\s’‘´]/gu, '')
+    .replace(/[!"#$%&'()*+,./:;<=>?@[\\\]^_`{|}~-]/gu, '')
+  if (/^(?:JP|JA|JPN)$/iu.test(language)) {
+    normalized = normalized.replace(/1ninn/giu, 'hitori')
+      .replace(/2ninn/giu, 'futari')
+  }
+  if (!/^[A-Za-z]+$/u.test(normalized)) {
+    throw new Error('explicit pronunciation contains unsupported characters')
+  }
+  return `${match[1]}[${normalized}]`
+}
 
 export function isNonVocalTrackMetadata (metadata = {}) {
   return NON_VOCAL_TITLE.test(
@@ -71,6 +105,36 @@ export function normalizeReading (text) {
   }
 }
 
+function isStructuredCredit (text, line, metadata, index) {
+  if (STRUCTURED_CREDIT_LABEL.test(text)) return true
+  const speaker = text.match(SPEAKER_LABEL)
+  if (speaker && !text.slice(speaker[0].length).trim()) return true
+  const single = text.match(SINGLE_SPEAKER_LABEL)
+  if (!single) return false
+  if (!text.slice(single[0].length).trim()) return true
+  // A verified speaker name still does not prove that the text after the
+  // colon is metadata. This pipeline does not safely split such rows, so
+  // preserve every non-empty speaker-shaped lyric.
+  return false
+}
+
+function titleHeaderComparable (text, metadata) {
+  const titles = [metadata?.title, metadata?.rawTitle].filter(Boolean)
+  for (const title of titles) {
+    const normalizedTitle = normalizeLyricComparable(title)
+    if (normalizedTitle === normalizeLyricComparable(text)) return true
+    const withoutEdition = String(title).replace(
+      /\s*[([（【]?(?:live|现场|現場|女声版|女聲版|男声版|男聲版|acoustic|remix|version|ver\.?|edit|mix)[^\])】）]*[\])】）]?\s*$/iu,
+      '',
+    )
+    if (
+      withoutEdition !== title &&
+      normalizeLyricComparable(withoutEdition) === normalizeLyricComparable(text)
+    ) return true
+  }
+  return false
+}
+
 export function lyricLineKind (line, {
   metadata = {},
   index = 0,
@@ -94,11 +158,12 @@ export function lyricLineKind (line, {
     CJK_CREDIT_PREFIX.test(text) ||
     CJK_CREDIT_PREFIX.test(compactLabel) ||
     ENGLISH_CREDIT_PREFIX.test(text) ||
-    COPYRIGHT_PREFIX.test(text) ||
+    COPYRIGHT_NOTICE.test(text) ||
     (romanized && ROMANIZED_CREDIT_PREFIX.test(compactLabel))
   ) {
     return 'credit'
   }
+  if (isStructuredCredit(text, line, metadata, index)) return 'credit'
 
   const start = Number(line?.start) || 0
   const identityValues = [
@@ -113,7 +178,8 @@ export function lyricLineKind (line, {
   if (
     index <= 3 &&
     start <= 3000 &&
-    identityValues.includes(normalizeLyricComparable(text))
+    (identityValues.includes(normalizeLyricComparable(text)) ||
+      titleHeaderComparable(text, metadata))
   ) {
     return 'header'
   }

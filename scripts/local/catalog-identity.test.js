@@ -45,3 +45,18 @@ test('same-title recordings by another artist are never safe corrections', () =>
     duration: 210,
   }).safe).toBe(false)
 })
+
+test('partial artist overlap and cover/live versions are never safe', () => {
+  expect(catalogMetadataConfidence({
+    title: '君にまつわるミステリー',
+    artistNames: ['佐藤聡美', '茅野愛衣'], duration: 256,
+  }, {
+    title: '君にまつわるミステリー (Cover)',
+    artistNames: ['璃夜纱Ryosa', '茅野愛衣'], duration: 257,
+  }).safe).toBe(false)
+  expect(catalogMetadataConfidence({
+    title: '瑠璃色の地球', artist: '松田聖子', duration: 248,
+  }, {
+    title: '瑠璃色の地球', artist: '民间翻唱', duration: 248,
+  }).safe).toBe(false)
+})

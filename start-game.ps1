@@ -11,6 +11,25 @@ $ExpectedProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd(
   [System.IO.Path]::DirectorySeparatorChar,
   [System.IO.Path]::AltDirectorySeparatorChar
 )
+# Pass the exact host executable to the Node child. This works in both
+# PowerShell 7 and the Windows PowerShell 5.1 fallback without using the
+# PowerShell 7-only Start-Process -Environment parameter.
+$PowerShellExecutable = ''
+try {
+  $PowerShellExecutable = [System.Diagnostics.Process]::GetCurrentProcess().
+    MainModule.FileName
+} catch {
+  $hostExecutableName = if ($PSVersionTable.PSEdition -eq 'Core') {
+    'pwsh.exe'
+  } else {
+    'powershell.exe'
+  }
+  $PowerShellExecutable = Join-Path $PSHOME $hostExecutableName
+}
+if ([string]::IsNullOrWhiteSpace($PowerShellExecutable)) {
+  throw 'Unable to identify the PowerShell executable hosting start-game.ps1.'
+}
+$env:TMN_POWERSHELL = [System.IO.Path]::GetFullPath($PowerShellExecutable)
 $ExpectedServerProtocol = 3
 $serverSourceFiles = @(
   Get-Item -LiteralPath (Join-Path $ProjectRoot 'scripts\local-server.js')
@@ -835,6 +854,80 @@ function Get-TypingManiaNovelNode {
   return $systemNode.Source
 }
 
+function Import-WindowsProxyEnvironment {
+  # Node honours explicit proxy environment variables. When the player uses
+  # the ordinary Windows per-user proxy setting, mirror only that setting into
+  # this child service; credentials and PAC contents are never logged or saved.
+  if (
+    [string]::IsNullOrWhiteSpace($env:HTTP_PROXY) -and
+    [string]::IsNullOrWhiteSpace($env:HTTPS_PROXY)
+  ) {
+    try {
+      $settings = Get-ItemProperty `
+        -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' `
+        -ErrorAction Stop
+      if ([int] $settings.ProxyEnable -eq 1) {
+        $proxy = [string] $settings.ProxyServer
+        $httpProxy = ''
+        $httpsProxy = ''
+        if ($proxy.Contains(';')) {
+          foreach ($entry in $proxy.Split(';')) {
+            $parts = $entry.Split('=', 2)
+            if ($parts.Count -ne 2) { continue }
+            if ($parts[0] -eq 'http') { $httpProxy = $parts[1] }
+            if ($parts[0] -eq 'https') { $httpsProxy = $parts[1] }
+          }
+        } else {
+          $httpProxy = $proxy
+          $httpsProxy = $proxy
+        }
+        if (-not [string]::IsNullOrWhiteSpace($httpProxy)) {
+          if ($httpProxy -notmatch '^https?://') { $httpProxy = "http://$httpProxy" }
+          $env:HTTP_PROXY = $httpProxy
+        }
+        if (-not [string]::IsNullOrWhiteSpace($httpsProxy)) {
+          if ($httpsProxy -notmatch '^https?://') { $httpsProxy = "http://$httpsProxy" }
+          $env:HTTPS_PROXY = $httpsProxy
+        }
+      }
+    } catch {}
+  }
+  $localBypass = '127.0.0.1,localhost,::1'
+  $proxyOverride = ''
+  $proxyAutoConfig = ''
+  $proxyScope = 'unknown'
+  try {
+    $settings = Get-ItemProperty `
+      -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' `
+      -ErrorAction Stop
+    $proxyOverride = [string] $settings.ProxyOverride
+    $proxyAutoConfig = [string] $settings.AutoConfigURL
+  } catch {}
+  if ([string]::IsNullOrWhiteSpace($env:NO_PROXY)) {
+    $env:NO_PROXY = $localBypass
+  } else {
+    $env:NO_PROXY = "$localBypass,$($env:NO_PROXY)"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($proxyOverride)) {
+    $env:NO_PROXY = "$env:NO_PROXY,$proxyOverride"
+  }
+  $httpCandidate = [string] $env:HTTP_PROXY
+  $httpsCandidate = [string] $env:HTTPS_PROXY
+  if ([string]::IsNullOrWhiteSpace($httpCandidate) -and [string]::IsNullOrWhiteSpace($httpsCandidate)) {
+    $proxyScope = if (-not [string]::IsNullOrWhiteSpace($proxyAutoConfig)) { 'unknown' } else { 'none' }
+  } elseif ($httpCandidate -match '(?i)(?:127\.0\.0\.1|localhost|::1)(?::\d+)?' -or
+    $httpsCandidate -match '(?i)(?:127\.0\.0\.1|localhost|::1)(?::\d+)?' -or
+    $proxyOverride -match '(?i)(?:qq|tencent|163|126|netease|kugou|bilibili|gtimg)') {
+    $proxyScope = 'split'
+  } else {
+    $proxyScope = 'global'
+  }
+  $env:TMN_SYSTEM_HTTP_PROXY = [string] $env:HTTP_PROXY
+  $env:TMN_SYSTEM_HTTPS_PROXY = [string] $env:HTTPS_PROXY
+  $env:TMN_SYSTEM_NO_PROXY = [string] $env:NO_PROXY
+  $env:TMN_SYSTEM_PROXY_SCOPE = $proxyScope
+}
+
 try {
   [void] (New-Item -ItemType Directory -Path $DataDirectory -Force)
   Remove-StaleManagedPidFiles
@@ -850,10 +943,16 @@ try {
     }
 
     $node = Get-TypingManiaNovelNode
+    Import-WindowsProxyEnvironment
+    $nodeMajor = [int] ((& $node -p "process.versions.node.split('.')[0]").Trim())
+    $nodeArguments = @("`"$serverScript`"", "--port=$Port")
+    if ($nodeMajor -ge 24) {
+      $nodeArguments = @('--use-env-proxy') + $nodeArguments
+    }
 
     $server = Start-Process `
       -FilePath $node `
-      -ArgumentList @("`"$serverScript`"", "--port=$Port") `
+      -ArgumentList $nodeArguments `
       -WorkingDirectory $ProjectRoot `
       -WindowStyle Hidden `
       -RedirectStandardOutput $OutputLog `

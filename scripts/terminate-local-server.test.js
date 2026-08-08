@@ -30,8 +30,14 @@ test('managed service records must bind to this exact project and script', () =>
   }, root)).toBe(false)
 })
 
-test('invalid or legacy PID text is not trusted', () => {
+test('legacy PID text requires a port inferred from a project marker filename', () => {
   expect(parseManagedRecord('12345')).toBeNull()
+  expect(parseManagedRecord('12345', 8765)).toEqual({
+    version: 0,
+    processId: 12345,
+    port: 8765,
+    legacy: true,
+  })
   expect(parseManagedRecord('not-json')).toBeNull()
   expect(parseManagedRecord(JSON.stringify({
     processId: 123,

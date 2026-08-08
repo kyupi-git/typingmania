@@ -69,11 +69,11 @@ function hasBalancedTitleBrackets (text) {
   return stack.length === 0
 }
 
-export const SONG_ORIGIN_VERSION = 3
+export const SONG_ORIGIN_VERSION = 5
 
 const MEDIA_PATTERNS = [
+  ['film', /(?:剧场版|劇場版|动画电影|動畫電影|动漫电影|動漫電影|アニメ映画|anime\s+film|animated\s+film)/iu],
   ['tv', /\bTV\s*(?:动画|動畫|アニメ|anime)/iu],
-  ['film', /(?:剧场版|劇場版|anime\s+film|animated\s+film)/iu],
   // Some provider catalogs omit the TV prefix for character and image
   // songs. Film-specific wording is checked first, so a remaining generic
   // animation label safely describes the television/series production.
@@ -93,7 +93,7 @@ const ROLE_PATTERNS = [
   ['soundtrack', /(?:原声带(?:收录)?歌曲|原聲帶(?:收錄)?歌曲|サウンドトラック収録曲|soundtrack\s+(?:song|track))/iu],
   ['character', /(?:角色(?:歌(?:曲)?|曲)|キャラクターソング|character\s+song)/iu],
   ['image', /(?:印象曲|イメージソング|image\s+song)/iu],
-  ['insert', /(?:插入曲|插曲|挿入歌|insert\s+song)/iu],
+  ['insert', /(?:插入曲|插曲|剧中歌|劇中歌|挿入歌|insert\s+song)/iu],
   ['opening', /(?:片头(?:主题)?曲|片頭(?:主題)?曲|オープニング(?:テーマ|主題歌)?|opening(?:\s+(?:theme|song))?|\bOP\b)/iu],
   ['ending', /(?:片尾(?:主题)?曲|エンディング(?:テーマ|主題歌)?|ending(?:\s+(?:theme|song))?|\bED\b)/iu],
   ['theme', /(?:主题曲|主題歌|テーマソング|theme\s+song)/iu],

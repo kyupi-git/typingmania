@@ -1,10 +1,24 @@
+import fs from 'fs/promises'
+import os from 'os'
+import path from 'path'
+import { TextDecoder, TextEncoder } from 'util'
+
 import { test } from '@jest/globals'
+
+import PackedFile from '../../src/lib/packedfile.js'
+
+globalThis.TextDecoder = TextDecoder
+globalThis.TextEncoder = TextEncoder
 
 import {
   canonicalSongTitle,
   songsAreEquivalent,
 } from './song-identity.js'
-import { makeSongsIndex } from './library.js'
+import {
+  makeSongsIndex,
+  sanitizeUnverifiedImportedArtists,
+  scanSongPackages,
+} from './library.js'
 
 test('parenthetical aliases do not create a second song identity', () => {
   expect(canonicalSongTitle('サンプル曲 (示例歌曲) (示例歌曲)'))
@@ -77,4 +91,58 @@ test('each imported provider collection exposes distinct local preview artwork',
       'assets/provider-art/apple-music.svg',
       'assets/provider-art/local-files.svg',
     ])
+})
+
+test('imported translated lyric layers are kept out of the playable index', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tmn-library-lyrics-'))
+  const filename = path.join(root, 'translated.typingmania')
+  const packed = new PackedFile()
+  try {
+    packed.addFile('song.json', Buffer.from(JSON.stringify({
+      title: '恋するココロ',
+      artist: 'eufonius',
+      language: 'JP',
+      duration: 20,
+      cpm: 100,
+      max_cpm: 100,
+      audio: 'audio.mp3',
+      source: { service: 'netease' },
+    })))
+    packed.addFile('audio.mp3', new Uint8Array([1]))
+    packed.addFile('lyrics.csv', Buffer.from([
+      '0,3000,心中悄然萌生爱恋',
+      '3000,6000,两个人相遇的奇迹',
+      '6000,9000,想把这份心意告诉你',
+      '9000,12000,明天也要一起向前',
+      '12000,15000,直到永远都不分离',
+    ].join('\n')))
+    await fs.writeFile(filename, Buffer.from(packed.pack()))
+    const result = await scanSongPackages(root)
+
+    expect(result.records).toHaveLength(0)
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        filename,
+        error: expect.stringContaining('translated Chinese lyric layer'),
+      }),
+    ]))
+  } finally {
+    packed.destroy()
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an older unverified Japanese artist alias is retained as pending in the index', () => {
+  const song = sanitizeUnverifiedImportedArtists({
+    artist: '七音阿卡莉 / Sou',
+    artistNames: ['七音阿卡莉', 'Sou'],
+    language: 'JP',
+    source: {
+      service: 'netease',
+      artist_resolution: { version: 4, resolved: true },
+    },
+  })
+
+  expect(song.artist).toBe('七音阿卡莉 / Sou')
+  expect(song.rawArtistNames).toEqual(['七音阿卡莉', 'Sou'])
 })

@@ -11,10 +11,31 @@ import {
   needsSongOriginRefresh,
   refreshMissingSongOrigins,
 } from './song-origin-maintenance.js'
+import { SONG_ORIGIN_LOOKUP_VERSION } from './song-origin-package.js'
 import { SONG_ORIGIN_VERSION } from './song-origin-resolver.js'
 
 globalThis.TextEncoder = TextEncoder
 globalThis.TextDecoder = TextDecoder
+
+test('rechecks legacy animation-film origin after medium schema version bump', () => {
+  const base = {
+    source: { service: 'qqmusic' },
+    subtitle: '《示例电影》动画电影主题曲',
+    origin: {
+      version: 3,
+      work_title: '示例电影',
+      original_language: 'zh',
+      original_verified: true,
+      title_source: 'catalog-primary',
+      medium: 'tv',
+    },
+  }
+  expect(needsSongOriginRefresh(base)).toBe(true)
+  expect(needsSongOriginRefresh({
+    ...base,
+    origin: { ...base.origin, version: SONG_ORIGIN_VERSION, medium: 'film' },
+  })).toBe(false)
+})
 
 test('startup maintenance adds an original work title to an existing package', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tmn-origin-maintenance-'))
@@ -140,12 +161,62 @@ test('startup maintenance removes an unverified translated origin when no origin
     expect(refreshed.source.checks.origin_original).toBe(false)
     expect(refreshed.source.origin_resolution).toMatchObject({
       version: SONG_ORIGIN_VERSION,
+      lookup_version: SONG_ORIGIN_LOOKUP_VERSION,
       resolved: false,
     })
     expect(needsSongOriginRefresh(refreshed)).toBe(false)
   } finally {
     await fs.rm(root, { recursive: true, force: true })
   }
+})
+
+test('legacy negative origin resolution is retried when lookup policy is missing', () => {
+  expect(needsSongOriginRefresh({
+    source: {
+      service: 'qqmusic',
+      origin_resolution: {
+        version: SONG_ORIGIN_VERSION,
+        resolved: false,
+        checked_at: new Date().toISOString(),
+      },
+    },
+  })).toBe(true)
+})
+
+test('current negative origin resolution remains in the retry backoff', () => {
+  expect(needsSongOriginRefresh({
+    source: {
+      service: 'netease',
+      origin_resolution: {
+        version: SONG_ORIGIN_VERSION,
+        lookup_version: SONG_ORIGIN_LOOKUP_VERSION,
+        resolved: false,
+        checked_at: new Date().toISOString(),
+      },
+    },
+  })).toBe(false)
+})
+
+test('verified positive origin does not refresh solely for lookup policy', () => {
+  expect(needsSongOriginRefresh({
+    origin: {
+      version: SONG_ORIGIN_VERSION,
+      work_title: '検証済み作品',
+      original_language: 'ja',
+      original_verified: true,
+      title_source: 'catalog-primary',
+      medium: 'tv',
+      role: 'ending',
+    },
+    source: {
+      service: 'apple-music',
+      origin_resolution: {
+        version: SONG_ORIGIN_VERSION,
+        resolved: true,
+        checked_at: new Date().toISOString(),
+      },
+    },
+  })).toBe(false)
 })
 
 test('startup maintenance refreshes a source-work title used for a Japanese anime', () => {

@@ -15,8 +15,22 @@ import {
 } from '../menu-navigation.js'
 import {
   LIBRARY_EDITOR_CONFIRM_CODE,
+  LIBRARY_EDITOR_DEDUPE_CODE,
+  LIBRARY_EDITOR_INCOMPLETE_CODE,
+  LIBRARY_EDITOR_REFRESH_CODE,
+  LIBRARY_EDITOR_SORT_PREFIX,
   LIBRARY_EDITOR_TOGGLE_CODE,
 } from '../../screen/library-editor-dialog.js'
+import {
+  NETWORK_CHECK_CODE,
+  NETWORK_LOGS_CODE,
+  NETWORK_PROXY_APPLY_CODE,
+  NETWORK_REGION_PREFIX,
+} from '../../screen/network-status-dialog.js'
+import {
+  PLAY_STYLES,
+  PLAY_STYLE_PREFIX,
+} from '../../screen/play-style-dialog.js'
 import { isStarterSong } from '../../song/starter-song.js'
 
 const IMPORT_PROVIDERS = Object.freeze([
@@ -66,6 +80,43 @@ function fileExtension (value) {
   return match?.[0] || ''
 }
 
+export function sortEditableSongs (songs, mode = 'title', direction = 'asc') {
+  const factor = direction === 'desc' ? -1 : 1
+  const text = value => String(value || '').normalize('NFKC')
+  const completenessFields = [
+    'pronunciation', 'lyrics', 'identity', 'origin', 'album', 'poster',
+  ]
+  const completenessScore = song => completenessFields.reduce(
+    (score, field) => score + Number(Boolean(song.completeness?.[field])),
+    0,
+  )
+  const values = [...(songs || [])]
+  values.sort((left, right) => {
+    let compared = 0
+    if (mode === 'source') {
+      compared = text(left.source).localeCompare(text(right.source)) ||
+        text(left.directory).localeCompare(text(right.directory))
+    } else if (mode === 'completeness') {
+      compared = completenessScore(left) - completenessScore(right)
+      for (const field of completenessFields) {
+        if (compared) break
+        compared = Number(Boolean(left.completeness?.[field])) -
+          Number(Boolean(right.completeness?.[field]))
+      }
+      if (compared) return compared * factor
+      return text(left.directory).localeCompare(text(right.directory)) ||
+        text(left.title).localeCompare(text(right.title)) ||
+        text(left.id).localeCompare(text(right.id))
+    } else {
+      compared = text(left.title).localeCompare(text(right.title))
+    }
+    return compared * factor ||
+      text(left.title).localeCompare(text(right.title)) ||
+      text(left.id).localeCompare(text(right.id))
+  })
+  return values
+}
+
 export default class MenuController {
   constructor (game) {
     this.game = game
@@ -74,7 +125,6 @@ export default class MenuController {
     this.current_index = 0
     this.local_collection = null
     this.loaded_from_url = false
-    this.mode_before_demo = 'normal'
     this.sort_mode = game.preferences.songSortMode
     this.sort_direction = game.preferences.songSortDirection
     this.added_order = new WeakMap()
@@ -88,6 +138,7 @@ export default class MenuController {
     this.game.menu_screen.setSongScrollHandler(
       step => this.moveCurrentSelection(step),
     )
+    this.playStyleInitialized = false
   }
 
   updateSong (update_all = false) {
@@ -246,23 +297,58 @@ export default class MenuController {
     this.game.loading_screen.updateGameMode(mode)
     this.game.song_screen.updateGameMode(mode)
     this.game.result_screen.updateGameMode(mode)
+    this.game.songinfo_screen.updateGameMode(mode)
   }
 
-  toggleDemoMode () {
-    if (this.game.game_mode === 'auto') {
-      this.setGameMode(this.mode_before_demo)
-    } else {
-      this.mode_before_demo = this.game.game_mode
-      this.setGameMode('auto')
+  setPlayStyle (style, { playSound = true } = {}) {
+    const selected = PLAY_STYLES.includes(style) ? style : 'normal'
+    this.game.preferences.setPlayStyle?.(selected)
+    this.setGameMode(selected === 'demo'
+      ? 'auto'
+      : selected === 'simple'
+        ? 'assist'
+        : 'normal')
+    if (playSound) this.game.sfx.play('select2')
+  }
+
+  async selectPlayStyle () {
+    let selected = Math.max(
+      0,
+      PLAY_STYLES.indexOf(this.game.preferences.playStyle),
+    )
+    this.game.menu_screen.showPlayStyleMenu(PLAY_STYLES[selected])
+    while (true) {
+      const action = await this.game.input.waitForAnyKey()
+      if (action.key === 'Escape' || action.key === 'Backspace') break
+      if (action.key === 'ArrowUp' || action.key === 'ArrowDown') {
+        selected = moveSelection(
+          selected,
+          PLAY_STYLES.length,
+          action.key === 'ArrowUp' ? -1 : 1,
+        ).index
+        this.game.menu_screen.setPlayStyleSelection(selected)
+        this.game.sfx.play('select')
+        continue
+      }
+      let style = ''
+      if (String(action.key).startsWith(PLAY_STYLE_PREFIX)) {
+        style = action.key.slice(PLAY_STYLE_PREFIX.length)
+      } else if (action.key === 'Enter' || action.key === ' ') {
+        style = PLAY_STYLES[selected]
+      }
+      if (PLAY_STYLES.includes(style)) {
+        this.setPlayStyle(style)
+        break
+      }
     }
-    this.game.sfx.play('select2')
+    this.game.menu_screen.hidePlayStyleMenu()
   }
 
   cycleGameMode () {
-    const modes = ['normal', 'easy', 'tempo', 'auto', 'blind', 'blank']
+    const modes = ['normal', 'easy', 'tempo', 'blind', 'blank']
     const current = modes.indexOf(this.game.game_mode)
     const next = modes[(current + 1) % modes.length]
-    if (next === 'auto') this.mode_before_demo = this.game.game_mode
+    this.game.preferences.setPlayStyle('normal')
     this.setGameMode(next)
   }
 
@@ -971,6 +1057,103 @@ export default class MenuController {
     }
   }
 
+  async showNetworkStatus () {
+    const t = this.game.i18n.t.bind(this.game.i18n)
+    let session
+    try {
+      session = await this.localLibrarySession('network.startLauncher')
+      const response = await fetch('/api/network/status', {
+        headers: { 'X-TMN-Token': session.local.token },
+        cache: 'no-store',
+      })
+      if (!response.ok) throw new Error(t('network.error'))
+      this.game.menu_screen.showNetworkStatus(await response.json())
+    } catch (error) {
+      this.game.sfx.play('error')
+      this.game.loading_screen.show()
+      this.game.loading_screen.setMainText(t('network.error'))
+      this.game.loading_screen.setSubText(error.message)
+      await this.game.input.waitForAnyKey()
+      this.game.loading_screen.hide()
+      return
+    }
+
+    while (true) {
+      const action = await this.game.input.waitForAnyKey()
+      if (action.key === 'Escape' || action.key === 'Backspace') break
+      if (action.code === NETWORK_LOGS_CODE || action.key === 'Tab') {
+        this.game.menu_screen.toggleNetworkLogs()
+        this.game.sfx.play('select')
+        continue
+      }
+      if (action.code === NETWORK_CHECK_CODE || action.key.toLowerCase() === 'r') {
+        this.game.menu_screen.setNetworkCheckBusy(true)
+        try {
+          const response = await fetch('/api/network/check', {
+            method: 'POST',
+            headers: session.headers,
+          })
+          if (!response.ok) throw new Error(t('network.error'))
+          this.game.menu_screen.setNetworkStatus(await response.json())
+          this.game.sfx.play('select2')
+        } catch {
+          this.game.sfx.play('error')
+        } finally {
+          this.game.menu_screen.setNetworkCheckBusy(false)
+        }
+        continue
+      }
+      if (String(action.key).startsWith(NETWORK_REGION_PREFIX)) {
+        const region = action.key.slice(NETWORK_REGION_PREFIX.length)
+        this.game.menu_screen.setNetworkCheckBusy(true)
+        try {
+          const response = await fetch('/api/network/region', {
+            method: 'PUT',
+            headers: session.headers,
+            body: JSON.stringify({ region }),
+          })
+          if (!response.ok) throw new Error(t('network.regionError'))
+          this.game.menu_screen.setNetworkStatus(await response.json())
+          this.game.sfx.play('select2')
+        } catch {
+          this.game.sfx.play('error')
+        } finally {
+          this.game.menu_screen.setNetworkCheckBusy(false)
+        }
+        continue
+      }
+      if (action.code === NETWORK_PROXY_APPLY_CODE) {
+        this.game.menu_screen.setNetworkCheckBusy(true)
+        try {
+          const response = await fetch('/api/network/proxy', {
+            method: 'PUT',
+            headers: session.headers,
+            body: JSON.stringify(
+              this.game.menu_screen.getNetworkProxySettings(),
+            ),
+          })
+          const updated = await response.json().catch(() => null)
+          if (!response.ok) {
+            throw new Error(updated?.error || t('network.proxyError'))
+          }
+          this.game.menu_screen.setNetworkStatus(updated)
+          this.game.sfx.play('select2')
+        } catch (error) {
+          this.game.sfx.play('error')
+          this.game.loading_screen.show()
+          this.game.loading_screen.setMainText(t('network.proxyError'))
+          this.game.loading_screen.setSubText(error.message)
+          await this.game.input.waitForAnyKey()
+          this.game.loading_screen.hide()
+        } finally {
+          this.game.menu_screen.setNetworkCheckBusy(false)
+        }
+      }
+    }
+    this.game.menu_screen.hideNetworkStatus()
+    this.game.sfx.play('exit')
+  }
+
   toggleLibraryEditorSelection (songs, selectedIds, index) {
     const song = songs[index]
     if (!song) return
@@ -1027,8 +1210,14 @@ export default class MenuController {
     }
 
     let cursor = 0
+    let editorSortMode = 'title'
+    let editorSortDirection = 'asc'
     const selectedIds = new Set()
     this.game.menu_screen.showLibraryEditor(songs, { mode })
+    this.game.menu_screen.setLibraryEditorSort(
+      editorSortMode,
+      editorSortDirection,
+    )
     this.game.menu_screen.setLibraryEditorCursor(cursor)
     while (true) {
       const action = await this.game.input.waitForAnyKey()
@@ -1045,6 +1234,64 @@ export default class MenuController {
         this.game.menu_screen.setLibraryEditorCursor(cursor)
         this.toggleLibraryEditorSelection(songs, selectedIds, cursor)
         this.game.sfx.play('select2')
+      } else if (
+        mode === 'editor' &&
+        String(action.key).startsWith(LIBRARY_EDITOR_SORT_PREFIX)
+      ) {
+        const requested = action.key.slice(LIBRARY_EDITOR_SORT_PREFIX.length)
+        if (requested === editorSortMode) {
+          editorSortDirection = editorSortDirection === 'asc' ? 'desc' : 'asc'
+        } else {
+          editorSortMode = requested
+          editorSortDirection = requested === 'completeness' ? 'desc' : 'asc'
+        }
+        songs = sortEditableSongs(
+          songs,
+          editorSortMode,
+          editorSortDirection,
+        )
+        cursor = 0
+        this.game.menu_screen.setLibraryEditorSongs(songs)
+        this.game.menu_screen.setLibraryEditorSort(
+          editorSortMode,
+          editorSortDirection,
+        )
+        this.game.menu_screen.setLibraryEditorCursor(cursor)
+        this.game.menu_screen.setLibraryEditorSelection(selectedIds)
+        this.game.sfx.play('select2')
+      } else if (
+        mode === 'editor' &&
+        (
+          action.code === LIBRARY_EDITOR_REFRESH_CODE ||
+          action.key.toLocaleLowerCase() === 'u'
+        )
+      ) {
+        this.game.menu_screen.hideLibraryEditor()
+        await this.refreshLibraryMetadata()
+        return
+      } else if (
+        mode === 'editor' &&
+        action.code === LIBRARY_EDITOR_DEDUPE_CODE
+      ) {
+        this.game.menu_screen.hideLibraryEditor()
+        this.game.sfx.play('select2')
+        await this.deduplicateLibrary({ providedSession: session })
+        return
+      } else if (
+        mode === 'editor' &&
+        action.code === LIBRARY_EDITOR_INCOMPLETE_CODE
+      ) {
+        selectedIds.clear()
+        for (const song of songs) {
+          if (!song.completeness?.complete) selectedIds.add(song.id)
+        }
+        this.game.menu_screen.setLibraryEditorSelection(selectedIds)
+        if (!selectedIds.size) {
+          this.game.sfx.play('error')
+          continue
+        }
+        this.game.sfx.play('select2')
+        if (await this.confirmSelectedSongDeletion(selectedIds.size)) break
       } else if (
         action.key === ' ' ||
         action.key === 'Space' ||
@@ -1129,10 +1376,10 @@ export default class MenuController {
     this.updateSong(true)
   }
 
-  async deduplicateLibrary () {
+  async deduplicateLibrary ({ providedSession = null } = {}) {
     const t = this.game.i18n.t.bind(this.game.i18n)
     try {
-      const session = await this.localLibrarySession()
+      const session = providedSession || await this.localLibrarySession()
       const response = await fetch('/api/library/duplicates', {
         headers: { 'X-TMN-Token': session.local.token },
         cache: 'no-store',
@@ -1258,15 +1505,15 @@ export default class MenuController {
       this.game.loading_screen.setMainText(t(
         cancelled
           ? 'metadata.refresh.cancelled'
-          : result.networkInterrupted
-          ? 'metadata.refresh.interrupted'
+          : result.networkDegraded
+          ? 'metadata.refresh.degraded'
           : 'metadata.refresh.complete',
       ))
       this.game.loading_screen.setSubText(t(
         cancelled
           ? 'metadata.refresh.cancelledDetail'
-          : result.networkInterrupted
-          ? 'metadata.refresh.interruptedDetail'
+          : result.networkDegraded
+          ? 'metadata.refresh.degradedDetail'
           : 'metadata.refresh.completeDetail',
         {
           updated: result.updated || 0,
@@ -1428,6 +1675,10 @@ export default class MenuController {
   }
 
   async run () {
+    if (!this.playStyleInitialized) {
+      this.playStyleInitialized = true
+      this.setPlayStyle(this.game.preferences.playStyle, { playSound: false })
+    }
     // Show all scene
     this.game.menu_screen.show()
     this.game.songinfo_screen.show()
@@ -1543,7 +1794,12 @@ export default class MenuController {
 
           case 'm':
           case 'M':
-            this.toggleDemoMode()
+            await this.selectPlayStyle()
+            break
+
+          case 'n':
+          case 'N':
+            await this.showNetworkStatus()
             break
 
           case 'v':
@@ -1559,16 +1815,6 @@ export default class MenuController {
           case 'e':
           case 'E':
             await this.editLibrary()
-            break
-
-          case 'u':
-          case 'U':
-            await this.refreshLibraryMetadata()
-            break
-
-          case 'g':
-          case 'G':
-            await this.deduplicateLibrary()
             break
 
           case 'a':

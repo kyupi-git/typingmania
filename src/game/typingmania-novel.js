@@ -51,6 +51,7 @@ export default class TypingManiaNovel {
     this.score = null
     this.media = null
     this.music_video = null
+    this.game_mode = 'normal'
 
     this.background_screen = new BackgroundScreen(this.viewport, this.i18n)
     this.songinfo_screen = new SongInfoScreen(this.viewport, this.i18n)
@@ -79,7 +80,6 @@ export default class TypingManiaNovel {
 
     this.volume_controller = new VolumeController(this)
 
-    this.game_mode = 'normal'
     this.i18n.subscribe(() => this.applyLocale())
   }
 

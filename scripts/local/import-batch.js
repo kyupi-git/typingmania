@@ -8,6 +8,7 @@ export function createImportBatchResult (requested) {
     skipped: 0,
     duplicates: 0,
     failed: 0,
+    staleCandidatesSkipped: 0,
     batchComplete: false,
     cacheExhausted: false,
     cancelled: false,

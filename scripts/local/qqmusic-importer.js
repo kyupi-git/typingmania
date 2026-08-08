@@ -9,7 +9,11 @@ import {
   parseSongOrigin,
   SONG_ORIGIN_VERSION,
 } from '../../src/song/song-origin.js'
-import { PACE_METADATA_VERSION } from '../../src/util/song-meta.js'
+import {
+  ASSIST_PACE_METADATA_VERSION,
+  estimateAssistReferencePace,
+  PACE_METADATA_VERSION,
+} from '../../src/util/song-meta.js'
 import {
   analyzeSongTitle,
   SONG_TITLE_CLEANUP_VERSION,
@@ -33,6 +37,7 @@ import OriginalArtistResolver, {
 } from './original-artist.js'
 import { loadBundledFallbackCover } from './fallback-artwork.js'
 import { inferScreenOriginFromAlbum } from './imported-song-enrichment.js'
+import { retainVerifiableArtistNames } from './imported-artist.js'
 import {
   convertQrcFiles,
   LYRIC_QUALITY_VERSION,
@@ -62,7 +67,7 @@ import {
   discoverQQMusicCache,
   discoverQQMusicDownloadDirectories,
   fetchOfficialCover,
-  fetchOfficialLyrics,
+  fetchBestQQMusicLyrics,
   fetchTrackEkey,
   fetchTrackMetadataWithFallback,
   isQQMusicNetworkError,
@@ -80,6 +85,13 @@ import { rankLyricsCandidates } from './qrc-candidate.js'
 import { NetworkCircuitBreaker } from './network.js'
 import { importMediaDirectorySongs } from './local-folder-importer.js'
 import { detectDecryptedAudioContainer } from './qqmusic-audio.js'
+import { convertTimedLyrics } from './timed-lyrics.js'
+import {
+  isQQMusicCandidateQuarantined,
+  loadQQMusicCandidateState,
+  quarantineQQMusicCandidate,
+  saveQQMusicCandidateState,
+} from './qqmusic-candidate-state.js'
 
 function parseQrcFilename (root) {
   const parts = root.split(' - ')
@@ -382,6 +394,11 @@ async function writeSongPackage ({
     metadata.rawTitle || metadata.title,
     { language: metadata.language },
   )
+  const assistPace = estimateAssistReferencePace(
+    lyrics.lyricsCsv,
+    metadata.language,
+    { durationMs: audioInfo.duration * 1000 },
+  )
   const song = {
     title: titleCleanup.title,
     subtitle: metadata.subtitle,
@@ -392,6 +409,8 @@ async function writeSongPackage ({
     language: metadata.language,
     cpm: lyrics.cpm,
     max_cpm: lyrics.maxCpm,
+    assist_cpm: assistPace.averageCpm,
+    assist_max_cpm: assistPace.peakCpm,
     duration: Math.ceil(audioInfo.duration),
     image: imageName,
     poster: posterName || undefined,
@@ -432,6 +451,9 @@ async function writeSongPackage ({
         pronunciation_online: pronunciationVerification.checked
           ? pronunciationVerification.passed
           : null,
+        pronunciation_complete: ['verified', 'ruby-assisted'].includes(
+          lyrics.stats.pronunciationStatus || 'verified',
+        ),
         origin_original: metadata.origin ? true : null,
       },
       cover: coverSourceInfo(cover, posterResolution),
@@ -450,6 +472,10 @@ async function writeSongPackage ({
           lyrics.stats.songSpecificPronunciationLines,
         pronunciation_override_lines:
           lyrics.stats.pronunciationOverrideLines,
+        pronunciation_status: lyrics.stats.pronunciationStatus || 'verified',
+        explicit_ruby_lines: lyrics.stats.explicitRubyLines || 0,
+        dictionary_pronunciation_lines: lyrics.stats.dictionaryPronunciationLines || 0,
+        pending_pronunciation_lines: lyrics.stats.pendingPronunciationLines || 0,
         pronunciation_offline_trusted:
           pronunciationVerification.offlineTrusted,
         pronunciation_online_local_coverage:
@@ -483,6 +509,12 @@ async function writeSongPackage ({
         model: 'demo-human-cadence',
         average: 'score-typing-time',
         peak: 'event-based-5-second-window',
+      },
+      assist_pace: {
+        version: ASSIST_PACE_METADATA_VERSION,
+        required_keys: assistPace.requiredKeys,
+        average: 'manual-anchor-typing-time',
+        peak: 'manual-anchor-event-based-5-second-window',
       },
     },
   }
@@ -583,6 +615,7 @@ export async function importRecentQQMusicSongs ({
 }) {
   await qmcCrypto.ready
   const result = createImportBatchResult(limit)
+  const candidateState = await loadQQMusicCandidateState(root)
 
   onProgress({ phase: 'session', message: 'Checking QQ Music session...', ...result })
   const session = await readQQMusicSession()
@@ -661,6 +694,11 @@ export async function importRecentQQMusicSongs ({
       }
       if (!coverRefreshOnly && !needsMoreNewSongs(result)) break
       result.inspected++
+      if (isQQMusicCandidateQuarantined(candidateState, track)) {
+        result.skipped++
+        result.staleCandidatesSkipped++
+        continue
+      }
       let metadata = null
       try {
         if (coverRefreshOnly && !existingMediaIds.has(track.mediaMid)) {
@@ -699,6 +737,7 @@ export async function importRecentQQMusicSongs ({
         )
         metadata = await artistResolver.resolveMetadata(metadata)
         const independentCatalog = await resolveImportedCatalogMatch({
+          root,
           metadata,
           provider: 'qqmusic',
           qqCookie: session.cookie,
@@ -710,6 +749,9 @@ export async function importRecentQQMusicSongs ({
             independentCatalog.metadata,
           )
         }
+        // Keep provider names visible when original-name verification is
+        // pending, while allowing exact/consensus catalog evidence to win.
+        metadata = retainVerifiableArtistNames(metadata)
         if (!parseSongOrigin(metadata.subtitle)) {
           metadata = inferScreenOriginFromAlbum(metadata) || metadata
         }
@@ -867,9 +909,6 @@ export async function importRecentQQMusicSongs ({
         }
 
         const lyricCandidates = rankLyricsCandidates(metadata, qrcCatalog).slice(0, 8)
-        if (!lyricCandidates.length) {
-          throw new Error('matching QRC lyrics were not found')
-        }
 
         onProgress({
           phase: 'lyrics',
@@ -888,11 +927,12 @@ export async function importRecentQQMusicSongs ({
                 'online pronunciation checks skipped after repeated network failures',
               networkFailed: false,
             }
-          : await fetchOfficialLyrics(
-              metadata.songMid,
-              session.cookie,
+          : await fetchBestQQMusicLyrics({
+              songMid: metadata.songMid,
+              songId: metadata.songId,
+              cookie: session.cookie,
               metadata,
-            )
+            })
         if (officialLyrics.networkFailed) {
           lyricNetworkCircuit.recordFailure()
         } else {
@@ -908,6 +948,7 @@ export async function importRecentQQMusicSongs ({
               romaFile: candidate.roma,
               metadata,
               officialLines: officialLyrics.checked ? officialLyrics.lines : [],
+              pronunciationVerified: candidate.offlinePronunciationTrusted || officialLyrics.readingChecked === true,
             })
             const verification = compareOfficialLyrics(
               converted.verificationLines,
@@ -941,7 +982,10 @@ export async function importRecentQQMusicSongs ({
             if (
               lyricLanguage(metadata.language) === 'ja' &&
               !pronunciationVerification.checked &&
-              !candidate.offlinePronunciationTrusted
+              !candidate.offlinePronunciationTrusted &&
+              !['pending', 'ruby-assisted'].includes(
+                converted.stats.pronunciationStatus,
+              )
             ) {
               throw new Error(
                 'Japanese pronunciation cannot be verified online or by exact offline QRC identity',
@@ -972,6 +1016,30 @@ export async function importRecentQQMusicSongs ({
             lyricErrors.push(error.message)
           }
         }
+        if (!chosenLyrics && officialLyrics.checked) {
+          try {
+            const converted = await convertTimedLyrics({
+              mainLines: officialLyrics.lines,
+              readingLines: officialLyrics.readingLines,
+              metadata,
+              readingSource: officialLyrics.readingChecked
+                ? 'qqmusic-official-roma'
+                : 'qqmusic-official-dictionary',
+            })
+            chosenLyrics = {
+              score: 0,
+              lyrics: converted,
+              verification: compareOfficialLyrics(converted.verificationLines, officialLyrics),
+              pronunciationVerification: compareOfficialPronunciation(
+                converted.verificationReadings,
+                officialLyrics,
+                metadata.language,
+              ),
+            }
+          } catch (error) {
+            lyricErrors.push(error.message)
+          }
+        }
         if (!chosenLyrics) {
           throw new Error(
             `no QRC candidate passed automatic lyric reconciliation` +
@@ -982,6 +1050,16 @@ export async function importRecentQQMusicSongs ({
         const lyricVerification = chosenLyrics.verification
         const pronunciationVerification =
           chosenLyrics.pronunciationVerification
+        if (
+          pronunciationVerification.checked ||
+          pronunciationVerification.offlineTrusted
+        ) {
+          lyrics.stats.pronunciationStatus = 'verified'
+        } else if (lyrics.stats.explicitRubyLines > 0) {
+          lyrics.stats.pronunciationStatus = 'ruby-assisted'
+        } else {
+          lyrics.stats.pronunciationStatus = 'pending'
+        }
 
         onProgress({
           phase: 'cover',
@@ -1063,6 +1141,12 @@ export async function importRecentQQMusicSongs ({
         }
         consecutiveNetworkFailures = 0
       } catch (error) {
+        if (!metadata && (
+          error?.code === 'QQMUSIC_METADATA_UNAVAILABLE' ||
+          /recovered metadata media ID does not match/u.test(error?.message || '')
+        )) {
+          quarantineQQMusicCandidate(candidateState, track)
+        }
         recordImportFailure(result, {
           error,
           stage: 'import',
@@ -1148,6 +1232,7 @@ export async function importRecentQQMusicSongs ({
     }
     return result
   } finally {
+    await saveQQMusicCandidateState(root, candidateState).catch(() => {})
     session.cookie = ''
     session.uin = ''
   }

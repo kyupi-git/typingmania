@@ -3,6 +3,55 @@
 Notable TypingManiaNovel changes are documented here. Versions use the planned
 release date in `YYYYMMDD` form.
 
+## [20260808] - 2026-08-08
+
+### Added
+
+- Added Simple mode and a unified Standard/Simple/Demo play-style selector;
+  Standard remains the default. Simple mode asks for the initial of each
+  Chinese character, Japanese reading unit, or English word, then completes
+  the remainder automatically. Assisted input is shown separately and does
+  not affect CPM or ordinary scores.
+- Added a network and source dashboard with device-region and proxy-exit-region
+  status, split-routing decisions, system/direct/manual proxy choices,
+  reachability and latency. A background startup preflight checks official
+  endpoints and trusted mirrors, keeping imports and optional refreshes
+  responsive.
+- Expanded Song info & editing with completeness status for reading, lyrics,
+  identity, direct production, cover, and poster; sorting, incomplete-song
+  selection, duplicate review, batch deletion, metadata refresh, and safe
+  cleanup are available in one screen.
+
+### Changed
+
+- Demo now advances line by line only after accepted input, including during
+  high CPM or low frame-rate play, so late-song notes are not silently skipped.
+- Import validation and metadata refresh now share fail-closed multi-source
+  checks across QQ Music, NetEase, Apple Music, and local folders. Exact
+  recording identity, complete vocal lyrics, direct production and original
+  title, and trustworthy artwork are cross-checked.
+- Original artist names now prefer exact provider IDs and independent evidence.
+  A trusted provider or embedded label may remain pending/unverified when
+  online proof is unavailable; biographies, copyright notices, unknown or
+  malformed fields stay blank. Verified identities cannot be replaced by covers or
+  near-matches. Chinese, English, and Japanese credit/copyright rows are
+  filtered from lyrics.
+- Japanese ruby and offline reading assistance are supported. A playable song
+  may remain pending when its recording-specific pronunciation still needs
+  verification; the pending reading is clearly unverified and never overwrites
+  recording-specific ruby or timing. Character voice credits use
+  `Character (CV: voice actor)` only when directly supported; biography or
+  copyright text is never treated as a singer or lyric.
+- PowerShell 7 is preferred, with the built-in Windows PowerShell fallback when
+  it is unavailable. Launch and termination affect only this project's service
+  and browser window.
+
+### Privacy and distribution
+
+- Public-package privacy audits keep only the three starter songs and exclude
+  imported media, lyrics, artwork, sessions, caches, logs, and private library
+  data.
+
 ## [20260726] - 2026-07-26
 
 ### Added
@@ -114,5 +163,6 @@ release date in `YYYYMMDD` form.
 - Preferred Hepburn Japanese romanization order while preserving accepted
   alternative spellings.
 
+[20260808]: https://github.com/kyupi-git/typingmania/compare/v20260726...v20260808
 [20260726]: https://github.com/kyupi-git/typingmania/releases/tag/v20260726
 [20260719]: https://github.com/kyupi-git/typingmania/releases/tag/v20260719

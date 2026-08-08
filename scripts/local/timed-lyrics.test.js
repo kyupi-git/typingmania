@@ -97,7 +97,7 @@ test('a moderate lyric cannot inherit a long instrumental break', () => {
   expect(stats.removedGapMs).toBeGreaterThan(2_000)
 })
 
-test('instrumental metadata and token-poor placeholder lyrics are not playable', () => {
+test('instrumental metadata and token-poor placeholder lyrics are not playable', async () => {
   const instrumentalLines = parseLrc(lrc([
     'la',
     'la',
@@ -105,10 +105,10 @@ test('instrumental metadata and token-poor placeholder lyrics are not playable',
     'la',
     'la',
   ]), { durationMs: 15_000 })
-  expect(() => convertTimedLyrics({
+  await expect(convertTimedLyrics({
     mainLines: instrumentalLines,
     metadata: { language: 'EN', title: 'Demo (Instrumental)', duration: 15 },
-  })).toThrow(/instrumental|non-vocal/iu)
+  })).rejects.toThrow(/instrumental|non-vocal/iu)
 
   const placeholderLines = parseLrc(lrc([
     'No lyrics',
@@ -117,13 +117,26 @@ test('instrumental metadata and token-poor placeholder lyrics are not playable',
     'Music only',
     'BGM',
   ]), { durationMs: 15_000 })
-  expect(() => convertTimedLyrics({
+  await expect(convertTimedLyrics({
     mainLines: placeholderLines,
     metadata: { language: 'EN', title: 'Demo', duration: 15 },
-  })).toThrow(/playable timed lines/iu)
+  })).rejects.toThrow(/playable timed lines/iu)
 })
 
-test('English conversion removes credits and keeps only letter input', () => {
+test('timed conversion rejects a translated lyric layer after metadata filtering', async () => {
+  const lines = parseLrc(lrc([
+    '不管你在什么地方都会寻找你的身影',
+    '即使找到你也无法说些什么',
+    '今天过去明天无法预见',
+    '世界仍然继续旋转',
+  ]), { durationMs: 12_000 })
+  await expect(convertTimedLyrics({
+    mainLines: lines,
+    metadata: { language: 'JP', title: '恋するココロ', duration: 12 },
+  })).rejects.toThrow(/translated Chinese lyric layer/iu)
+})
+
+test('English conversion removes credits and keeps only letter input', async () => {
   const lines = parseLrc(lrc([
     'Lyrics by Example Writer',
     'We type the lights',
@@ -132,7 +145,7 @@ test('English conversion removes credits and keeps only letter input', () => {
     'Nothing slows the rhythm',
     'And the ending lands',
   ]), { durationMs: 18_000 })
-  const converted = convertTimedLyrics({
+  const converted = await convertTimedLyrics({
     mainLines: lines,
     metadata: { language: 'EN', duration: 18 },
   })
@@ -141,7 +154,7 @@ test('English conversion removes credits and keeps only letter input', () => {
   expect(converted.lyricsCsv).not.toContain('Lyrics by Example Writer')
 })
 
-test('Chinese conversion generates offline pinyin for every lyric line', () => {
+test('Chinese conversion generates offline pinyin for every lyric line', async () => {
   const lines = parseLrc(lrc([
     '星光落在指尖',
     '微风穿过窗前',
@@ -149,7 +162,7 @@ test('Chinese conversion generates offline pinyin for every lyric line', () => {
     '让旋律不停歇',
     '明天依然相见',
   ]), { durationMs: 15_000 })
-  const converted = convertTimedLyrics({
+  const converted = await convertTimedLyrics({
     mainLines: lines,
     metadata: { language: 'ZH', duration: 15 },
   })
@@ -157,7 +170,7 @@ test('Chinese conversion generates offline pinyin for every lyric line', () => {
   expect(converted.stats.displayOnlyLines).toBe(0)
 })
 
-test('Japanese Kanji requires song-specific timed romanization', () => {
+test('Japanese Kanji without verification is accepted as pending dictionary pronunciation', async () => {
   const mainLines = parseLrc(lrc([
     '明日へ走る',
     '光を探す',
@@ -165,10 +178,11 @@ test('Japanese Kanji requires song-specific timed romanization', () => {
     '未来へ届け',
     '今ここで歌う',
   ]), { durationMs: 15_000 })
-  expect(() => convertTimedLyrics({
+  const pending = await convertTimedLyrics({
     mainLines,
     metadata: { language: 'JP', duration: 15 },
-  })).toThrow(/pronunciation coverage/iu)
+  })
+  expect(pending.stats.pronunciationStatus).toBe('pending')
 
   const readingLines = parseLrc(lrc([
     'ashitaehashiru',
@@ -177,7 +191,7 @@ test('Japanese Kanji requires song-specific timed romanization', () => {
     'miraie todoke',
     'imakokodeutau',
   ]), { durationMs: 15_000 })
-  const converted = convertTimedLyrics({
+  const converted = await convertTimedLyrics({
     mainLines,
     readingLines,
     metadata: { language: 'JP', duration: 15 },
@@ -186,7 +200,7 @@ test('Japanese Kanji requires song-specific timed romanization', () => {
   expect(converted.stats.songSpecificPronunciationLines).toBe(5)
 })
 
-test('Japanese inline ruby guides typing but is hidden from the lyric display', () => {
+test('Japanese inline ruby guides typing but is hidden from the lyric display', async () => {
   const mainLines = parseLrc(lrc([
     '夕焼(ゆうや)けの空(そら)',
     '明日(あした)へ行(い)こう',
@@ -194,7 +208,7 @@ test('Japanese inline ruby guides typing but is hidden from the lyric display', 
     '未来(みらい)を見(み)よう',
     '一緒(いっしょ)に歌(うた)う',
   ]), { durationMs: 15_000 })
-  const converted = convertTimedLyrics({
+  const converted = await convertTimedLyrics({
     mainLines,
     metadata: { language: 'JP', duration: 15 },
   })
@@ -202,4 +216,22 @@ test('Japanese inline ruby guides typing but is hidden from the lyric display', 
   expect(converted.stats.pronunciationOverrideLines).toBe(5)
   expect(converted.lyricsCsv).toContain('夕焼けの空')
   expect(converted.lyricsCsv).not.toContain('(ゆうや)')
+})
+
+test('mixed partial ruby overrides one word and dictionary completes the rest', async () => {
+  const lines = parseLrc(lrc([
+    '宇宙(そら)を見上げる',
+    '明日へ走る',
+    '光を探す',
+    '心を重ねる',
+    '未来へ届け',
+  ]), { durationMs: 15_000 })
+  const converted = await convertTimedLyrics({
+    mainLines: lines,
+    metadata: { language: 'JP', duration: 15 },
+  })
+  expect(converted.stats.pronunciationStatus).toBe('ruby-assisted')
+  expect(converted.lyricsCsv).toContain('<<宇宙を見上げる>>')
+  expect(converted.lyricsCsv).not.toContain('(そら)')
+  expect(converted.lyricsCsv).toContain('[sorawomiageru]')
 })

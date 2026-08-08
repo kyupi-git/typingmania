@@ -269,14 +269,22 @@ function containerMetadata (container) {
 
 function audioMetadata (audioInfo, filename) {
   const common = audioInfo.parsed.common || {}
-  const artistNames = (common.artists?.length
+  let artistNames = (common.artists?.length
     ? common.artists
     : [common.artist || common.albumartist])
     .flatMap(value => String(value || '').split(/\s*[;/]\s*/u))
     .map(value => value.trim())
     .filter(Boolean)
+  const stem = path.basename(filename, path.extname(filename)).trim()
+  const filenameMatch = stem.match(/^(.+?)\s+-\s+(.+)$/u)
+  if (!artistNames.length && filenameMatch) {
+    artistNames = filenameMatch[1]
+      .split(/\s*[,;/、]\s*/u)
+      .map(value => value.trim())
+      .filter(Boolean)
+  }
   const title = String(
-    common.title || path.basename(filename, path.extname(filename)),
+    common.title || filenameMatch?.[2] || stem,
   ).trim()
   return {
     title,
@@ -339,6 +347,7 @@ async function prepareTrack (root, track, identified = {}, signal) {
     throw new Error('The ordinary download lacks title or artist tags')
   }
   const matched = await resolveImportedCatalogMatch({
+    root,
     metadata,
     provider: 'local-files',
   })
@@ -491,6 +500,7 @@ export async function importRecentNeteaseSongs ({
         if (detail) metadata = metadataFromNeteaseRecord(detail, metadata)
       }
       const independentCatalog = await resolveImportedCatalogMatch({
+        root,
         metadata,
         provider: 'netease',
         excludeServices: ['netease'],
@@ -516,8 +526,13 @@ export async function importRecentNeteaseSongs ({
           id: prepared.trackId,
         },
       })
-      metadata = retainVerifiableArtistNames(metadata)
       const lyrics = lyricResolution.lyrics
+      if ((!metadata.language || metadata.language === 'U') && lyrics.language) {
+        metadata.language = lyrics.language.toLocaleUpperCase() === 'JA'
+          ? 'JP'
+          : lyrics.language.toLocaleUpperCase()
+      }
+      metadata = retainVerifiableArtistNames(metadata)
 
       stage = 'audio'
       onProgress({ phase: stage, songTitle: metadata.title, ...result })
@@ -530,10 +545,14 @@ export async function importRecentNeteaseSongs ({
 
       stage = 'cover'
       onProgress({ phase: stage, songTitle: metadata.title, ...result })
-      let cover = embeddedArtwork(audioInfo)
-      if (!cover && metadata.albumPic) {
-        cover = await fetchNeteaseCover(metadata.albumPic).catch(() => null)
-      }
+      // Prefer the exact provider/catalog release cover. Embedded artwork is
+      // only a fallback because local files often carry a generic or unrelated
+      // jacket that cannot be independently verified.
+      let cover = metadata.albumPic
+        ? await fetchNeteaseCover(metadata.albumPic).catch(() => null)
+        : null
+      if (!cover) cover = independentCatalog?.cover || null
+      if (!cover) cover = embeddedArtwork(audioInfo)
       if (!cover) cover = await loadBundledFallbackCover(root)
 
       stage = 'origin'

@@ -28,6 +28,8 @@ apple-music-cookies*.txt
 /tools/importers/.download/
 **/__pycache__/
 *.py[cod]
+!/tools/importers/apple-music/runtime/*.pyd
+!/tools/importers/apple-music/runtime/**/*.pyd
 .env
 .env.*
 /tools/runtime/*.download
@@ -37,6 +39,7 @@ apple-music-cookies*.txt
 /data/*session*.json
 /data/*cookie*.txt
 /data/*ekey*
+/data/network-settings.json
 /data/upload-sessions/
 /data/import-staging/
 ref[0-9]*.png

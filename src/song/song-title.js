@@ -1,4 +1,4 @@
-export const SONG_TITLE_CLEANUP_VERSION = 2
+export const SONG_TITLE_CLEANUP_VERSION = 3
 
 const BRACKETED_TEXT = /\(([^()]*)\)|（([^（）]*)）|\[([^\[\]]*)\]|【([^【】]*)】/gu
 
@@ -8,6 +8,11 @@ const SOURCE_MARKER = /^(?:from|ost|op|ed|opening|ending|insert(?: song)?|theme)
 const NUMBER_MARKER = /^(?:[#№]\s*)?\d+(?:[.\-/]\d+)*$|^(?:part|pt|chapter|episode|ep|act|movement|take|disc|disk|track|season)\s*[#№.:_-]?\s*\d+/iu
 const STRUCTURAL_MARKER = /(?:章|篇|編|部|幕|話)$/u
 const EXPLICIT_ALIAS_MARKER = /^(?:translated title|translation|english title|chinese title|japanese title|korean title|中文(?:译名|譯名|名)?|英文(?:译名|譯名)?|日文(?:译名|譯名)?|韩文(?:译名|譯名)?|韓文(?:译名|譯名)?)\s*[:：]/iu
+
+// Keep this detector intentionally narrow: common Han/Japanese new-form
+// characters such as 体, 恋, and 号 are not evidence of Chinese translation.
+const NARROW_SIMPLIFIED_MARKER = /[类译语话门间过这还远边进]/u
+const NARROW_JAPANESE_MARKER = /[々〆ヶ偽間類]/u
 
 function normalizeForComparison (value) {
   return String(value || '')
@@ -127,6 +132,14 @@ function aliasDecision ({
     language,
   )) {
     return { remove: true, reason: 'shared-prefix-translation' }
+  }
+
+  if (
+    normalizedLanguage(language) === 'japanese' &&
+    NARROW_SIMPLIFIED_MARKER.test(trimmed) &&
+    NARROW_JAPANESE_MARKER.test(baseTitle)
+  ) {
+    return { remove: true, reason: 'same-script-simplified-alias' }
   }
 
   const baseScript = primaryScript(characterProfile(baseTitle))

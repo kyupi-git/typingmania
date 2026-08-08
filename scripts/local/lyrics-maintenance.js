@@ -11,6 +11,7 @@ import {
   isNonVocalTrackMetadata,
   LYRIC_QUALITY_VERSION,
   normalizeLyricComparable,
+  normalizeExplicitPronunciation,
 } from './lyrics-quality.js'
 import { scanSongLibrary } from './library.js'
 import { normalizeLyricTimingWindows } from './timed-lyrics.js'
@@ -82,7 +83,7 @@ async function refreshPackedSongLyrics (existingSong) {
     const lyrics = filtered.kept.map(line => [
       line.start,
       line.end,
-      line.lyric,
+      normalizeExplicitPronunciation(line.lyric, song.language),
     ])
     const timing = normalizeLyricTimingWindows(lyrics)
     const [lyricsCsv, cpm, maxCpm] = buildSongLyrics(lyrics, {

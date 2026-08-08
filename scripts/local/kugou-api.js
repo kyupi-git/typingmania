@@ -10,7 +10,7 @@ import { fetchWithRetry } from './network.js'
 const REQUEST_HEADERS = Object.freeze({
   Accept: 'application/json, text/plain, */*',
   Referer: 'https://www.kugou.com/',
-  'User-Agent': 'Mozilla/5.0 TypingManiaNovel/20260726',
+  'User-Agent': 'Mozilla/5.0 TypingManiaNovel/20260808',
 })
 const KRC_KEY = Buffer.from([
   0x40, 0x47, 0x61, 0x77, 0x5E, 0x32, 0x74, 0x47,
@@ -53,7 +53,7 @@ async function fetchJson (url) {
   return response.json()
 }
 
-export async function searchKugouTrack (metadata) {
+export async function searchKugouTracks (metadata) {
   const url = new URL('https://songsearch.kugou.com/song_search_v2')
   url.searchParams.set(
     'keyword',
@@ -89,7 +89,11 @@ export async function searchKugouTrack (metadata) {
       }
     })
     .filter(candidate => candidate?.hash)
-    .sort((left, right) => right.score - left.score)[0] || null
+    .sort((left, right) => right.score - left.score)
+}
+
+export async function searchKugouTrack (metadata) {
+  return (await searchKugouTracks(metadata))[0] || null
 }
 
 function decodeKrc (encoded) {
@@ -169,37 +173,43 @@ async function searchKugouLyrics (metadata, track) {
     .sort((left, right) => (
       Math.abs(Number(left.duration) - metadata.duration * 1000) -
       Math.abs(Number(right.duration) - metadata.duration * 1000)
-    ))[0] || null
+    ))
 }
 
 export async function resolveKugouLyrics (metadata) {
-  const track = await searchKugouTrack(metadata)
-  if (!track) throw new Error('KuGou has no safely matched recording')
-  const candidate = await searchKugouLyrics(metadata, track)
-  if (!candidate?.id || !candidate?.accesskey) {
-    throw new Error('KuGou has no verified synchronized lyrics')
+  const tracks = await searchKugouTracks(metadata)
+  if (!tracks.length) throw new Error('KuGou has no safely matched recording')
+  let mainFallback = null
+  let attempts = 0
+  for (const track of tracks.slice(0, 4)) {
+    const candidates = await searchKugouLyrics(metadata, track)
+    for (const candidate of candidates.slice(0, 3)) {
+      if (!candidate?.id || !candidate?.accesskey || attempts++ >= 6) continue
+      const url = new URL('https://lyrics.kugou.com/download')
+      const values = {
+        ver: '1',
+        client: 'pc',
+        id: String(candidate.id),
+        accesskey: String(candidate.accesskey),
+        fmt: 'krc',
+        charset: 'utf8',
+      }
+      for (const [key, value] of Object.entries(values)) {
+        url.searchParams.set(key, value)
+      }
+      const payload = await fetchJson(url)
+      const parsed = parseDecodedKrc(decodeKrc(payload.content))
+      if (parsed.mainLines.length < 5) continue
+      const resolved = {
+        ...parsed,
+        service: 'kugou',
+        trackId: String(candidate.id),
+        romanized: parsed.readingLines.length > 0,
+      }
+      if (resolved.romanized) return resolved
+      mainFallback ||= resolved
+    }
   }
-  const url = new URL('https://lyrics.kugou.com/download')
-  const values = {
-    ver: '1',
-    client: 'pc',
-    id: String(candidate.id),
-    accesskey: String(candidate.accesskey),
-    fmt: 'krc',
-    charset: 'utf8',
-  }
-  for (const [key, value] of Object.entries(values)) {
-    url.searchParams.set(key, value)
-  }
-  const payload = await fetchJson(url)
-  const parsed = parseDecodedKrc(decodeKrc(payload.content))
-  if (parsed.mainLines.length < 5) {
-    throw new Error('KuGou synchronized lyrics are incomplete')
-  }
-  return {
-    ...parsed,
-    service: 'kugou',
-    trackId: String(candidate.id),
-    romanized: parsed.readingLines.length > 0,
-  }
+  if (mainFallback) return mainFallback
+  throw new Error('KuGou has no verified synchronized lyrics')
 }

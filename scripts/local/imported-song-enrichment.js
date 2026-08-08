@@ -9,6 +9,10 @@ import {
   searchQQMusicTracks,
 } from './qqmusic-api.js'
 import SongOriginResolver from './song-origin-resolver.js'
+import {
+  collectNetworkSources,
+  inferNetworkRegion,
+} from './network-source-planner.js'
 
 function normalize (value) {
   return String(value || '')
@@ -30,6 +34,46 @@ export function inferScreenOriginFromAlbum (metadata) {
   if (!album) return null
   const patterns = [
     {
+      media: 'animation-film',
+      pattern: /^(?:动画电影|動畫電影|动漫电影|動漫電影)\s*[《「『“"](.+?)[》」』”"]\s*(?:原声带|原聲帶|原声|原聲|OST|original\s+soundtrack)$/iu,
+    },
+    {
+      media: 'movie',
+      pattern: /^(?:电影|電影)\s*[《「『“"](.+?)[》」』”"]\s*(?:原声带|原聲帶|原声|原聲|OST|original\s+soundtrack)$/iu,
+    },
+    {
+      media: 'animation-film',
+      pattern: /^(?:アニメ映画|劇場版アニメ)\s*[『「“"](.+?)[』」”"]\s*(?:オリジナル[・\s]*サウンドトラック|サウンドトラック|OST)$/iu,
+    },
+    {
+      media: 'movie',
+      pattern: /^映画\s*[『「“"](.+?)[』」”"]\s*(?:オリジナル[・\s]*サウンドトラック|サウンドトラック|OST)$/iu,
+    },
+    {
+      media: 'tv-anime',
+      pattern: /^(.*?)(?:\s*[-–—:]\s*)?(?:TV\s*アニメ|テレビアニメ|anime\s+series)(?:\s+(?:original\s+)?(?:soundtrack|ost)|\s*オリジナル[・\s]*サウンドトラック)/iu,
+    },
+    {
+      media: 'tv-anime',
+      pattern: /^(?:TV\s*アニメ|テレビアニメ|anime\s+series)\s*[『「“"(（]?(.+?)[』」”" )）]?\s*(?:original\s+)?(?:soundtrack|ost|オリジナル[・\s]*サウンドトラック)$/iu,
+    },
+    {
+      media: 'animation-film',
+      pattern: /^(.*?)(?:\s*[-–—:]\s*)?(?:劇場版アニメ|anime\s+film|animated\s+film)(?:\s+(?:original\s+)?(?:soundtrack|ost)|\s*オリジナル[・\s]*サウンドトラック)/iu,
+    },
+    {
+      media: 'animation-film',
+      pattern: /^(?:劇場版アニメ|anime\s+film|animated\s+film)\s*[『「“"(（]?(.+?)[』」”" )）]?\s*(?:original\s+)?(?:soundtrack|ost|オリジナル[・\s]*サウンドトラック)$/iu,
+    },
+    {
+      media: 'sports-event',
+      pattern: /^(.*?)(?:\s*[-–—:]\s*|\s*[\(（]\s*)?(?:official\s+sports?\s+(?:event|broadcast)\s+(?:soundtrack|theme(?:s)?)|体育赛事(?:官方)?(?:原声(?:带)?|主题曲集)|體育賽事(?:官方)?(?:原聲(?:帶)?|主題曲集)|スポーツ(?:大会|中継)(?:公式)?(?:サウンドトラック|テーマ曲集))/iu,
+    },
+    {
+      media: 'commercial',
+      pattern: /^(.*?)(?:\s*[-–—:]\s*|\s*[\(（]\s*)?(?:original\s+(?:commercial|advertising)\s+soundtrack|广告片?原声(?:带)?|廣告片?原聲(?:帶)?|CM(?:版)?\s*オリジナル[・\s]*サウンドトラック)/iu,
+    },
+    {
       media: 'documentary',
       pattern: /^(.*?)(?:\s*[-–—:]\s*|\s*[\(（]\s*)?(?:original\s+documentary\s+soundtrack|纪录片原声(?:带)?|紀錄片原聲(?:帶)?|ドキュメンタリー(?:版)?\s*オリジナル[・\s]*サウンドトラック)/iu,
     },
@@ -43,7 +87,7 @@ export function inferScreenOriginFromAlbum (metadata) {
     },
     {
       media: 'movie',
-      pattern: /^(.*?)(?:\s*[-–—:]\s*|\s*[\(（]\s*)?(?:original\s+(?:motion\s+picture|film)\s+soundtrack|电影原声(?:带)?|電影原聲(?:帶)?|映画(?:版)?\s*オリジナル[・\s]*サウンドトラック|オリジナル[・\s]*サウンドトラック)/iu,
+      pattern: /^(.*?)(?:\s*[-–—:]\s*|\s*[\(（]\s*)?(?:original\s+(?:motion\s+picture|film)\s+soundtrack|电影原声(?:带)?|電影原聲(?:帶)?|映画(?:版)?\s*オリジナル[・\s]*サウンドトラック)/iu,
     },
     {
       media: 'visual-novel',
@@ -72,9 +116,13 @@ export function inferScreenOriginFromAlbum (metadata) {
     }
     const mediaLabel = {
       television: '电视剧',
+      'tv-anime': 'TV动画',
       movie: '电影',
+      'animation-film': '剧场版动画',
       documentary: '纪录片',
+      commercial: '广告片',
       variety: '综艺节目',
+      'sports-event': '体育赛事',
       'visual-novel': '视觉小说',
       jrpg: '日式角色扮演游戏',
       game: '游戏',
@@ -132,9 +180,9 @@ function qqCandidateScore (candidate, metadata) {
   return score
 }
 
-export async function matchQQMusicTrack (
+export async function findQQMusicTrackCandidates (
   metadata,
-  { qqCookie = '', searchQQ = searchQQMusicTracks, fetchQQ = fetchTrackMetadata } = {},
+  { qqCookie = '', searchQQ = searchQQMusicTracks } = {},
 ) {
   const title = String(metadata.title || '').trim()
   const artist = String(metadata.artistNames?.[0] || metadata.artist || '').trim()
@@ -150,17 +198,28 @@ export async function matchQQMusicTrack (
     }
   }
   await collect(`${title} ${artist}`.trim())
-  let best = [...candidateMap.values()]
+  let ranked = [...candidateMap.values()]
     .map(candidate => ({ candidate, score: qqCandidateScore(candidate, metadata) }))
     .filter(value => value.score >= 600)
-    .sort((left, right) => right.score - left.score)[0]?.candidate
-  if (!best && artist) {
+    .sort((left, right) => right.score - left.score)
+  if (!ranked.length && artist) {
     await collect(title)
-    best = [...candidateMap.values()]
+    ranked = [...candidateMap.values()]
       .map(candidate => ({ candidate, score: qqCandidateScore(candidate, metadata) }))
       .filter(value => value.score >= 600)
-      .sort((left, right) => right.score - left.score)[0]?.candidate
+      .sort((left, right) => right.score - left.score)
   }
+  return ranked.map(value => value.candidate)
+}
+
+export async function matchQQMusicTrack (
+  metadata,
+  { qqCookie = '', searchQQ = searchQQMusicTracks, fetchQQ = fetchTrackMetadata } = {},
+) {
+  const best = (await findQQMusicTrackCandidates(metadata, {
+    qqCookie,
+    searchQQ,
+  }))[0]
   if (!best?.songMid) return null
   return fetchQQ(best.songMid, qqCookie)
 }
@@ -176,40 +235,102 @@ export async function inferSongOriginHint (
   } = {},
 ) {
   if (parseSongOrigin(metadata.subtitle)) return metadata
-  let detail = null
+  const region = inferNetworkRegion()
+  const embeddedAlbumHint = inferScreenOriginFromAlbum(metadata)
+  const sources = [
+    ...(embeddedAlbumHint
+      ? [{
+          id: 'embedded-soundtrack-structure',
+          name: 'Embedded soundtrack metadata',
+          category: 'production',
+          priority: 90,
+          regionalPriority: {},
+          run: async () => embeddedAlbumHint,
+        }]
+      : []),
+    {
+      id: 'qqmusic-origin-hint',
+      name: 'QQ Music',
+      category: 'production',
+      priority: 30,
+      regionalPriority: { cn: 65, hk: 35, tw: 15, jp: -8, global: -5 },
+      run: async () => {
+        const detail = await matchQQMusicTrack(metadata, {
+          qqCookie,
+          searchQQ,
+          fetchQQ,
+        })
+        if (detail?.subtitle && parseSongOrigin(detail.subtitle)) {
+          return {
+            ...metadata,
+            subtitle: detail.subtitle,
+            albumMid: metadata.albumMid || detail.albumMid,
+            sourceHint: {
+              service: 'qqmusic-catalog',
+              songMid: detail.songMid,
+            },
+          }
+        }
+        return inferScreenOriginFromAlbum({
+          ...metadata,
+          album: metadata.album || detail?.album || '',
+        })
+      },
+    },
+    {
+      id: 'anisongdb-origin-hint',
+      name: 'AniSongDB',
+      category: 'production',
+      priority: 34,
+      regionalPriority: { jp: 55, us: 35, eu: 32, global: 25, cn: -20 },
+      run: () => inferAnisong(metadata),
+    },
+    {
+      id: 'animethemes-origin-hint',
+      name: 'AnimeThemes',
+      category: 'production',
+      priority: 30,
+      regionalPriority: { jp: 48, us: 34, eu: 30, global: 22, cn: -22 },
+      run: () => inferAnimeThemes(metadata),
+    },
+  ]
   try {
-    detail = await matchQQMusicTrack(metadata, {
-      qqCookie,
-      searchQQ,
-      fetchQQ,
+    const resolved = await collectNetworkSources(sources, {
+      region,
+      maxAccepted: 2,
+      maxAttempts: 3,
+      accept: value => Boolean(value?.subtitle && parseSongOrigin(value.subtitle)),
     })
-  } catch {}
-  if (detail?.subtitle && parseSongOrigin(detail.subtitle)) {
+    const hints = resolved.map(item => item.value).filter(Boolean)
+    if (!hints.length) return metadata
+    const primary = hints[0]
+    const primaryParts = parseSongOrigin(primary.subtitle)
+    const corroboratedBy = hints.slice(1).filter(value => {
+      const parts = parseSongOrigin(value.subtitle)
+      return parts && primaryParts &&
+        normalize(parts.workTitle) === normalize(primaryParts.workTitle) &&
+        parts.media === primaryParts.media &&
+        parts.role === primaryParts.role
+    }).map(value => value.sourceHint?.service).filter(Boolean)
     return {
+      // Origin services are allowed to contribute a production hint, not to
+      // replace the canonical recording identity. Some specialist APIs return
+      // only subtitle/sourceHint fields; spreading that partial object alone
+      // used to erase a valid provider title and artist before packaging.
       ...metadata,
-      subtitle: detail.subtitle,
-      albumMid: metadata.albumMid || detail.albumMid,
+      subtitle: primary.subtitle,
+      album: metadata.album || primary.album || '',
+      albumMid: metadata.albumMid || primary.albumMid || '',
+      originHintSource:
+        primary.originHintSource || metadata.originHintSource || undefined,
       sourceHint: {
-        service: 'qqmusic-catalog',
-        songMid: detail.songMid,
+        ...(primary.sourceHint || {}),
+        corroboratedBy,
       },
     }
+  } catch {
+    return metadata
   }
-  const inferredAlbumOrigin = inferScreenOriginFromAlbum({
-    ...metadata,
-    album: metadata.album || detail?.album || '',
-  })
-  if (inferredAlbumOrigin) return inferredAlbumOrigin
-  // An exact song-title lookup is useful even when an imported provider did
-  // not label the track as an anime song. This recovers songs whose single
-  // album contains no work title (for example a standalone ending theme).
-  const anisong = await inferAnisong(metadata).catch(() => null)
-  const animeThemes = anisong
-    ? null
-    : await inferAnimeThemes(metadata).catch(() => null)
-  return anisong || animeThemes
-    ? { ...metadata, ...(anisong || animeThemes) }
-    : metadata
 }
 
 export async function enrichImportedSong ({
@@ -220,6 +341,7 @@ export async function enrichImportedSong ({
   onOrigin = () => {},
   originResolver = new SongOriginResolver({ root }),
   posterResolver = new MediaPosterResolver(),
+  forceOriginRefresh = false,
   inferAnisong = inferAnisongOrigin,
   inferAnimeThemes = inferAnimeThemesOrigin,
 }) {
@@ -242,7 +364,9 @@ export async function enrichImportedSong ({
   if (parseSongOrigin(enriched.subtitle)) {
     onOrigin(enriched)
     try {
-      origin = await originResolver.resolve(enriched, cover)
+      origin = await originResolver.resolve(enriched, cover, {
+        forceRefresh: forceOriginRefresh,
+      })
     } catch {
       originLookupFailed = true
     }
@@ -256,7 +380,9 @@ export async function enrichImportedSong ({
     if (exact?.subtitle && parseSongOrigin(exact.subtitle)) {
       const exactMetadata = { ...metadata, ...exact }
       try {
-        origin = await originResolver.resolve(exactMetadata, cover)
+        origin = await originResolver.resolve(exactMetadata, cover, {
+          forceRefresh: forceOriginRefresh,
+        })
         if (origin) enriched = exactMetadata
       } catch {
         originLookupFailed = true

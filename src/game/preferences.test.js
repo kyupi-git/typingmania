@@ -78,3 +78,13 @@ test('music video playback is explicitly opt-in and persisted', () => {
   expect(storage.getItem(MUSIC_VIDEO_STORAGE_KEY)).toBe('true')
   expect(new GamePreferences({ storage }).musicVideoEnabled).toBe(true)
 })
+
+test('play style starts in Standard mode for every session', () => {
+  const storage = memoryStorage()
+  const preferences = new GamePreferences({ storage })
+  expect(preferences.playStyle).toBe('normal')
+  expect(preferences.setPlayStyle('simple')).toBe(true)
+  expect(new GamePreferences({ storage }).playStyle).toBe('normal')
+  expect(preferences.setPlayStyle('unsupported')).toBe(true)
+  expect(preferences.playStyle).toBe('normal')
+})

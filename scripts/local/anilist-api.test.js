@@ -28,6 +28,25 @@ test('a localized alias resolves to the direct production native title', () => {
   })
 })
 
+test('country of origin overrides Han-only title script inference', () => {
+  expect(selectAniListWorkCandidate([{
+    id: 4155,
+    format: 'TV',
+    countryOfOrigin: 'JP',
+    title: { native: '舞-HiME', romaji: 'Mai-HiME' },
+  }], { media: 'tv', workTitle: 'Mai-HiME' })).toMatchObject({
+    title: '舞-HiME', language: 'ja', catalogId: '4155',
+  })
+  expect(selectAniListWorkCandidate([{
+    id: 7001,
+    format: 'TV',
+    countryOfOrigin: 'CN',
+    title: { native: '大鱼海棠', romaji: 'Da Yu Hai Tang' },
+  }], { media: 'tv', workTitle: '大鱼海棠' })).toMatchObject({
+    title: '大鱼海棠', language: 'zh', catalogId: '7001',
+  })
+})
+
 test('an ambiguous partial title is not accepted', () => {
   const base = {
     format: 'TV',
@@ -75,4 +94,21 @@ test('AniList lookup is bounded and parses GraphQL media records', async () => {
     'https://graphql.anilist.co',
     expect.objectContaining({ method: 'POST' }),
   )
+})
+
+test('AniList ID lookup uses country of origin for Japanese Han-only titles', async () => {
+  const fetchImpl = jest.fn(async () => ({
+    ok: true,
+    json: async () => ({ data: { Media: {
+      id: 4155,
+      format: 'TV',
+      countryOfOrigin: 'JP',
+      title: { native: '舞-HiME' },
+      coverImage: {},
+    } } }),
+  }))
+  const { fetchAniListWorkById } = await import('./anilist-api.js')
+  await expect(fetchAniListWorkById(4155, { fetchImpl })).resolves.toMatchObject({
+    title: '舞-HiME', language: 'ja', catalogId: '4155',
+  })
 })

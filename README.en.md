@@ -2,14 +2,14 @@
 
 [简体中文](README.md) | **English** | [日本語](README.ja.md)
 
-**Version: 20260726**
+**Version: 20260808**
 
-[Changelog](CHANGELOG.md) · [20260726 release notes](docs/releases/20260726.md)
+[Changelog](CHANGELOG.md) · [20260808 release notes](docs/releases/20260808.md)
 
 TypingManiaNovel is a multilingual lyrics-typing rhythm game based on
 [TypingMania NEO](https://github.com/innocenat/typingmania). It supports
 Chinese, English, and Japanese songs, local or static-web play, predictive
-Keyfall feedback, Demo Play, library management, and importers for QQ Music,
+Keyfall feedback, Standard/Simple/Demo play, library management, and importers for QQ Music,
 NetEase Cloud Music, Apple Music, and a user-selected local folder.
 
 > **Import and build playable tracks automatically:** QQ Music cache and
@@ -27,7 +27,7 @@ NetEase Cloud Music, Apple Music, and a user-selected local folder.
 | ![Japanese-song gameplay](./screenshot2.gif) | ![English-song gameplay](./screenshot3.gif) |
 
 Download
-[`TypingManiaNovel-20260726-Windows-x64.zip`](https://github.com/kyupi-git/typingmania/releases/download/v20260726/TypingManiaNovel-20260726-Windows-x64.zip)
+[`TypingManiaNovel-20260808-Windows-x64.zip`](https://github.com/kyupi-git/typingmania/releases/download/v20260808/TypingManiaNovel-20260808-Windows-x64.zip)
 from Releases, extract it, and double-click `start-game.cmd`. The archive
 includes the runtime, so Node.js and npm are not required. For copyright
 reasons, the default library contains only one Chinese, one English, and one
@@ -53,10 +53,15 @@ and the initial song scan finish on the in-game loading screen, so a slow first
 scan is not misreported as a port conflict. Starting it again replaces only
 this copy's previous service and dedicated Edge game window.
 
+The launcher prefers PowerShell 7 when it is installed and automatically falls
+back to the Windows 11 built-in Windows PowerShell otherwise. No separate
+PowerShell 7, Node.js, npm, or Python installation is required.
+
 Double-click `terminate.cmd` to stop this project's service and close the
 dedicated Edge game window it launched. It verifies the localhost session,
 project path, and browser record, and does not terminate unrelated `node.exe`
-or normal browser processes.
+or normal browser processes. It also recognizes verified services, PID records,
+and unpacked local runtimes left by older TypingManiaNovel releases.
 
 Do not open `index.html` directly. Browser security rules block some required
 local-file operations; use the launcher, a web server, or a static deployment.
@@ -84,17 +89,17 @@ as the TypingMania NEO baseline.
 | Interface | Primarily English; keyboard-only menus | Browser-language detection, Chinese/English/Japanese UI, language picker, mouse selection, and wheel navigation |
 | Song library | Static index, URL selection, and drag-and-drop `.typingmania` files | Startup scan, deduplication, nested collections, artwork previews, and sorting by added time, required keys/min, title, or artist in either direction |
 | Import | User-prepared song packages | QQ Music, NetEase Cloud Music, Apple Music, and recursive local-folder import with an in-game batch picker, session/media validation, and cross-directory/provider deduplication |
-| Lyrics | Manual preparation, including Japanese Kanji readings | Language-specific non-lyric filtering; instrumental/BGM rejection; per-recording correction of instrumental gaps attached to a lyric; local Chinese pinyin; track-specific timed readings for Japanese Kanji |
+| Lyrics | Manual preparation, including Japanese Kanji readings | Language-specific non-lyric filtering; instrumental/BGM rejection; per-recording correction of instrumental gaps attached to a lyric; local Chinese pinyin; same-recording ruby/timed readings are preferred for Japanese Kanji, while complete offline dictionary readings may remain pending |
 | Required input | Some spaces and converted punctuation can be typeable | Spaces between English words and punctuation in every language remain visible but are no longer meaningless input targets; gameplay requires letter keys only |
 | Japanese typing | Kunrei-style forms lead the kana/romaji order, with alternate sequences accepted | Hepburn-style spellings such as `shi`, `chi`, and `tsu` are preferred to match this fork's typing style; the extra letters can raise the difficulty, while accepted alternatives and song-specific imported readings remain supported |
 | Artwork and origin | One package image | Verified direct animation, film, TV, documentary, commercial, variety, sports-event, visual-novel, JRPG, or game-production poster plus album cover; a source work is never substituted for its adaptation, and uncertain fields stay blank |
 | Difficulty | 90th-percentile and maximum CPM | Required keys/min as whole-song average and fastest five seconds, using the same timing model as perfect Demo Play and result statistics |
-| Automatic play | Hidden Auto mode can still be affected by player input | Explicit Demo Play types the lyrics automatically at a human-like pace; any song can achieve a one-click perfect full combo, and demo scores are kept separate |
+| Ways to play | Hidden Auto mode can still be affected by player input | Standard, Simple, and Demo. Simple asks for each word or character initial and fills the rest instantly without counting assisted keys in CPM or normal scores; Demo performs a human-paced one-click full combo |
 | Feedback | Typing sound and standard game modes | Predictive Keyfall targets, immediate green/red input pulse, correct/error/missed states, tiered streak glow, full-screen milestones, and bounded effects |
 | Results | Score, rank, combo, accuracy, and line totals | Expanded scorecard, typing-flow chart, rolling pace chart, reference pace, and delayed transition after the final lyric |
-| Library maintenance | No indexed multi-song editor or clean reset | Rollback-safe deletion, same-provider duplicate review, source-scoped reset, and safe refresh of origins, original work titles, posters, and album covers |
-| Network behavior | YouTube support for compatible songs | Local-first play; initial route profiles for mainland China, Hong Kong/Macau, Taiwan, Japan, South Korea, Southeast Asia, the US, Europe, and global use, then live success/latency reordering across lyric, music-catalog, and screen-catalog sources with bounded fallback |
-| Song Studio | Visual editor marked as in development | Local Preact/HTM Song Studio without a public-CDN dependency |
+| Library maintenance | No indexed multi-song editor or clean reset | Song info & editing shows reading, lyrics, identity, work, cover, and poster completeness, with sorting, incomplete-song selection, same-provider duplicate review, metadata refresh, rollback-safe deletion, and source-scoped reset |
+| Network behavior | YouTube support for compatible songs | A background startup preflight ranks 37 concrete music, lyric, production, artwork, and MV routes; the status screen separates device and proxy-exit regions and shows priority/latency for official endpoints and trusted mirrors, with system, direct, manual-proxy, and region controls; risky metadata still receives multi-source checks |
+| Song Studio | No library editor | Local Preact/HTM Song Studio without a public-CDN dependency |
 | Verification | Original Jest and build scripts | Unit, library-quality, runtime-integrity, public-tree, static-build, and browser smoke checks |
 
 TypingManiaNovel keeps best-effort compatibility with the original
@@ -108,6 +113,7 @@ songs.
   romaji.
 - Letter-only gameplay: spaces and punctuation stay visible but never require
   input.
+- Master volume starts at 100%; use `Page Up` / `Page Down` to adjust it.
 - Predictive Keyfall targets and lightweight streak celebration effects,
   switchable from the main menu.
 - Optional MV playback, off by default. Provider records, Bilibili, YouTube,
@@ -119,13 +125,25 @@ songs.
   fails, MV playback switches itself off to prevent repeated lookups on later
   songs. Album art remains visible.
 - Human-paced perfect Demo Play.
+- Simple mode asks for the initial of each Chinese character, Japanese reading
+  unit, or English word, then fills the rest instantly. Blue Keyfall notes mark
+  assistance, and only player keys count toward CPM.
 - Required keys/min values aligned across song selection, Demo Play, and
   result statistics.
 - Result scorecard, typing-flow analysis, and time-based pace chart.
 - Mouse, wheel, and keyboard navigation.
 - Sortable nested song collections and multi-select song deletion.
+- A completeness-aware Song info & editing table with metadata refresh and
+  duplicate review in the same screen.
+- Region, source-priority, latency, recent-log, and system/direct/manual proxy
+  controls in the network status screen.
 - Three checksum-verified starter songs and one-click library reset.
 - Bundled QQ Music, NetEase Cloud Music, Apple Music, and local-folder import paths.
+- Japanese lyrics may use explicit ruby or recording-specific timed readings.
+  If neither ruby nor a trusted online reading is available, a dictionary-
+  assisted song can still be imported as pending; it is never presented as
+  verified. Explicit readings accept ASCII letters only; spaces, underscores,
+  apostrophes, and display-only symbols are rejected.
 - Automatic rejection of instrumentals, BGM, placeholder lyrics, and credit
   rows, plus correction of lyric windows that obviously absorb an interlude.
 - Local audio/video plus compatible YouTube-backed `.typingmania` packages.
@@ -197,12 +215,10 @@ Each import batch:
    non-lyric rows using language-specific rules.
 6. Reconciles complete timed lyrics against the official response when
    available.
-7. Generates tone-free Chinese pinyin locally; Japanese requires a complete
-   song-specific `_qmRoma.qrc` reading for every playable line.
-8. Cross-checks QQ Music's online Roma response when available. When it is
-   unreachable, exact local identity plus complete karaoke timing provides the
-   offline proof; an uncertain Japanese reading is rejected rather than
-   guessed.
+7. Generates tone-free Chinese pinyin locally; Japanese prefers explicit ruby
+   or a complete song-specific timed reading for every playable line.
+8. When trusted online reading is unavailable, bundled dictionary output can
+   keep a track playable as pending; it is never shown as verified.
 9. Decrypts QMC2 audio in memory, identifies the actual FLAC/OGG container,
    and validates full duration. Subscription-only tracks unavailable to the
    signed-in account are skipped individually while eligible free tracks continue.
@@ -217,6 +233,9 @@ Before each import, the player chooses 1–500 songs (10 by default). `Esc` or
 latest five failures with their stage and reason. Unusable candidates do not
 consume the target.
 Running the action again continues with the next different songs.
+QQ Music unusable candidates are represented only by private local hashes to
+reduce repeated scans; hashes, caches, sessions, and import state stay out of
+Git, public song packages, and release archives.
 
 Detailed behavior, fallbacks, and privacy boundaries are documented in
 [Local QQ Music library](docs/local-qqmusic.md) and
@@ -231,8 +250,9 @@ ordinary files require strict tags/catalog/duration matching; cache bytes are
 decoded and accepted only when the media header, track ID, playable duration,
 published complete-file byte count, lyrics, pronunciation,
 and artwork all verify. A folder containing fewer candidates than requested returns a
-normal partial batch. Japanese Kanji requires the
-exact track's timed `romalrc`; an unverified reading is skipped. See the
+normal partial batch. Japanese Kanji prefers explicit ruby or the exact
+track's timed `romalrc`; when no trusted online reading exists, dictionary-
+assisted readings remain pending instead of being presented as verified. See the
 [local NetEase guide](docs/local-netease.md).
 
 ### Apple Music
@@ -246,8 +266,9 @@ stops at the chosen 1–500-song target before transfer, then produces AAC 256
 M4A and synchronized LRC for tracks that account can play. Repeating the
 action continues with later tracks.
 Every result is then checked for encryption state, media structure, duration,
-lyrics, pronunciation, artwork, and duplicates. Japanese Kanji is accepted
-only when a recording-specific Roma timeline can be cross-checked. See the
+lyrics, pronunciation, artwork, and duplicates. Japanese Kanji prefers a
+recording-specific Roma timeline or explicit ruby; when trusted online reading
+is unavailable, bundled dictionary output remains playable as pending. See the
 [local Apple Music guide](docs/local-apple-music.md).
 
 ### Local folder
@@ -258,8 +279,9 @@ artwork are preferred. Region-ranked lyric sources cross-check a same-name LRC;
 if its text clearly belongs to another song, the strictly matched provider
 timeline is used instead, while an unavailable network can still fall back to a
 locally validated sidecar. Chinese pinyin is generated locally, and Japanese
-Kanji still requires a recording-specific timed reading. Source files are never
-moved or changed, and staging copies are deleted immediately after validation.
+Kanji prefers a same-recording timed reading or explicit ruby; complete offline
+dictionary output may remain playable as pending. Source files are never moved
+or changed, and staging copies are deleted immediately after validation.
 
 All four paths follow the shared
 [music-service interoperability notice](MUSIC-SERVICE-INTEROPERABILITY-NOTICE.md).
@@ -274,6 +296,22 @@ All four paths follow the shared
   [TypingMania NEO](https://github.com/innocenat/typingmania) handles kana in
   ordinary song packages; it never chooses or replaces an imported
   song-specific reading.
+- Exact title, artist, and duration matches are checked across several release
+  records instead of trusting the first search result. A Japanese track with
+  only a translated Chinese lyric layer is not made playable; without a
+  recording-specific reading, dictionary assistance may keep it playable as
+  pending. A previously stored translated layer is excluded from the library
+  index.
+- Artist repair distinguishes the written name from parenthetical pronunciation,
+  romanization, and translated aliases; legacy results are rechecked so a kana
+  reading cannot replace a Japanese written name. Chinese, English, and Japanese
+  lyric cleanup removes credits, empty speaker labels, and version headers while
+  retaining real lyric text after a colon. Origins identify only the direct
+  production, distinguish an unspecified base work from a sequel, and reject
+  generic OST/media guesses. Animation, animation films, visual novels,
+  JRPGs/games, films, television, documentaries, commercials, variety shows,
+  and sports events use fail-closed multi-source checks; independent or
+  unverifiable direct origins remain blank.
 - Chinese pinyin is generated locally by
   [`pinyin-pro`](https://github.com/zh-lx/pinyin-pro).
 - During a user-started import, the selected music service supplies media the
@@ -288,12 +326,29 @@ All four paths follow the shared
   [Cover Art Archive](https://musicbrainz.org/doc/Cover_Art_Archive/API).
   Stored identity is corrected only by an exact match or high-confidence
   agreement between two independent catalogs.
+- An all-Han artist label on a Japanese track is not assumed to be original.
+  Singer details and independent catalogs should confirm the native name; when
+  proof is unavailable, a trustworthy provider or embedded label may remain
+  with a white `*` pending marker. Biography, copyright, unknown, and poisoned
+  values stay blank. Bilibili contributes only corroborating production-video
+  and MV leads, never artist names, lyric text, or readings.
+- Character voice credits are shown only as `Character (CV: Voice)` when the
+  relationship is directly supported. Biography or copyright text is never
+  treated as a singer, and a near-match catalog or cover cannot replace a
+  verified identity. Direct-production titles remain in their verified original
+  language; uncertain origins are left blank, and copyright notices stay out of
+  lyrics.
 - [AniSongDB](https://anisongdb.com/) and
   [AnimeThemes](https://animethemes.moe/) can propose an exact song-to-anime
-  production; [AniList](https://anilist.co/) and
+  production, including apostrophe-safe titles, multiple roles, and singer
+  credits; [AniList](https://anilist.co/) and
   [Bangumi](https://bangumi.github.io/api/) cross-check production IDs,
-  original-language titles, and posters. Film and television sources can also be checked
-  through Bangumi, [TVmaze](https://www.tvmaze.com/api), and optional
+  original-language titles (including the language field for all-Han titles),
+  and posters. [VNDB](https://api.vndb.org/kana)
+  covers visual novels, while [Steam](https://store.steampowered.com/) can
+  corroborate game and JRPG leads. Film, television, and documentary sources
+  can also be checked through Bangumi, [TVmaze](https://www.tvmaze.com/api),
+  Wikidata, and optional
   [TMDB](https://developer.themoviedb.org/reference/search-movie) access. The
   resolver never substitutes a manga, novel, or other pre-adaptation work.
 - The [YouTube IFrame API](https://developers.google.com/youtube/iframe_api_reference)
@@ -332,7 +387,10 @@ keeps the playfield visible for 1.4 seconds before showing results.
 
 ## Library editing and reset
 
-**Edit songs** supports keyboard and mouse multi-selection. Confirmed deletion
+**Song info & editing** shows reading, lyrics, identity, direct-production,
+album-cover, and poster completeness and can sort by completeness, source, or
+title. It supports keyboard and mouse multi-selection, incomplete-song
+selection, duplicate review, and metadata refresh. Confirmed deletion
 stages the selected packages, rebuilds the index, removes only their saved
 scores, prunes unreferenced private metadata, and rolls back interrupted
 pre-commit work at the next start. Protected starter packages cannot be
@@ -344,14 +402,17 @@ Apple Music, or local-folder songs. It clears only the corresponding scores
 and unreferenced metadata. Neither operation changes a music-client cache,
 download directory, selected source folder, app, or browser cookie store.
 
-**Refresh info** rechecks every imported song. It reads verifiable records
+Choose **Refresh song info** inside Song info & editing to recheck every imported song. It reads verifiable records
 from the originating provider, then uses independent catalogs to cross-check
 title spelling, complete artist credit, release data, and lyric language.
 Corrections require either a strict match or high-confidence two-source
 consensus. Direct animation, film, TV, documentary, commercial, variety,
 sports-event, visual-novel, JRPG, and game origins,
 original titles, and posters use the matching production catalog. Conflicting evidence is preserved rather
-than overwritten; uncertain new fields stay blank. `Escape` or `Backspace`
+than overwritten; uncertain new fields stay blank. Refresh bypasses stale
+provider-only origin hints, upgrades proven album evidence to a specialist
+production ID, and clears a provider hint that only repeats the song title.
+`Escape` or `Backspace`
 immediately aborts the active network stage instead of waiting for its timeout;
 already committed atomic updates remain saved.
 
@@ -363,18 +424,47 @@ only for a user-started import, optional metadata/artwork maintenance, the
 first play of an uncached song while MV playback is enabled, or a selected
 YouTube-backed song.
 
-No IP geolocation is performed. System locale, time zone, or the optional
-`TMN_NETWORK_REGION` value (`cn`, `hk`, `tw`, `jp`, `kr`, `sea`, `us`, `eu`,
-or `global`) selects
-the initial route profile; actual success, failure, and latency then reorder
-it. Mainland China begins with QQ Music, NetEase, KuGou, and Bangumi, while
-Hong Kong/Macau, Taiwan, Japan, South Korea, Southeast Asia, the US, Europe,
-and global profiles raise reachable LRCLIB, iTunes Search, MusicBrainz,
+Without a proxy, no public-IP geolocation is performed. System locale, time
+zone, or the optional `TMN_NETWORK_REGION` value (`cn`, `hk`, `tw`, `jp`,
+`kr`, `sea`, `us`, `eu`, or `global`) selects the initial route profile. If a
+system proxy can be reliably identified as mainland split routing (such as a
+loopback proxy with bypass rules), QQ Music, NetEase, KuGou, Bilibili, and
+other mainland services use the device-region direct route, while overseas
+services use the proxy and its coarse exit region. Remote or explicitly global
+proxies use the exit region globally; a manual proxy is always global. PAC and
+unreliably classified system proxies remain unknown; the application does not
+parse PAC files. Public IPs are never retained, logged, or persisted.
+
+As soon as the local service is ready, a non-blocking background preflight
+tests 37 concrete routes and applies the observed success, failure, cooldown,
+and latency to later imports, refreshes, artwork, and MV lookup. The route pool
+distinguishes compatible official service endpoints, maintained read-only
+mirrors, and independent corroborating catalogs. Mainland China begins with
+QQ Music, NetEase, KuGou, Bangumi, and Bilibili. NetEase and LRCLIB can switch
+between compatible service endpoints. Bangumi uses three official site aliases
+and, when its official API or image route fails, tries public
+`bgmapi.anibt.net` and `api.bangumi.lol` API routes and their image mirrors;
+mirror hosts receive public, unauthenticated production queries only. A source
+without a trustworthy public mirror falls back to an independent catalog,
+never an unknown forwarding proxy. The
+Hong Kong/Macau, Taiwan, Japan, South Korea, Southeast Asia, US, Europe, and
+global profiles raise reachable LRCLIB, iTunes Search, MusicBrainz,
 TVmaze, TMDB, and Wikidata routes as appropriate. Production evidence is
 ordered from provider/official records to specialist catalogs, encyclopedic
-cross-checks, and official media; media-platform results remain leads until
-verified. Each route has a short timeout, bounded retries, failure cooldown,
-and batch circuit breaker.
+cross-checks, and official media. Bilibili is a high-priority mainland source
+for official production-video and MV leads and may corroborate an already
+identified direct production, but it never determines a song title, artist,
+or original work title by itself. The Network & source status screen shows the effective region, route
+purpose, priority, measured latency, and recent logs, and allows a manual
+region override. Network access follows Windows system proxy settings by
+default; a direct route or a manual HTTP/HTTPS proxy can be selected instead.
+Even when a high-priority route works, medium-specific corroboration remains
+available: Bangumi for animation, VNDB for visual novels, Steam for games and
+JRPG leads, and TVmaze, Wikidata, or optional TMDB for live-action and
+documentary work. Each route has a short timeout, bounded retries, failure
+cooldown, and batch circuit breaker.
+Failed and timed-out checks display an em dash instead of reporting the time
+spent waiting as a successful response time.
 Uncertain optional fields remain blank or use neutral bundled art; only a
 track without playable lyrics or a provable required reading is rejected.
 
@@ -456,6 +546,7 @@ npm test
 npm run build-game
 npm run audit-library
 npm run verify-runtime
+npm run check-docs
 npm run audit-public
 ```
 

@@ -1,12 +1,82 @@
 import { pinyin } from '../../vendor/runtime/node_modules/pinyin-pro/dist/index.mjs'
 import { longestCommonSubsequenceLength } from './lyrics-quality.js'
+import { japaneseReading, parseJapaneseRuby } from './japanese-pronunciation.js'
 
-export const PRONUNCIATION_QUALITY_VERSION = 1
+export const PRONUNCIATION_QUALITY_VERSION = 2
+
+export { japaneseReading, parseJapaneseRuby }
 
 const PINYIN_UMLAUT = new Map([
   ['ü', 'v'], ['ǖ', 'v'], ['ǘ', 'v'], ['ǚ', 'v'], ['ǜ', 'v'],
   ['Ü', 'V'], ['Ǖ', 'V'], ['Ǘ', 'V'], ['Ǚ', 'V'], ['Ǜ', 'V'],
 ])
+
+function normalizedLanguageFamily (value) {
+  const language = String(value || '').toLocaleUpperCase()
+  if (/^(?:JP|JA|JPN)$/u.test(language)) return 'ja'
+  if (/^(?:ZH|CN|CHI|ZHO)$/u.test(language)) return 'zh'
+  if (/^(?:EN|ENG)$/u.test(language)) return 'en'
+  return ''
+}
+
+export function lyricScriptProfile (text = '') {
+  const source = String(text || '').normalize('NFKC')
+  return {
+    kana: (source.match(/[\p{Script=Hiragana}\p{Script=Katakana}]/gu) || []).length,
+    han: (source.match(/\p{Script=Han}/gu) || []).length,
+    latin: (source.match(/\p{Script=Latin}/gu) || []).length,
+  }
+}
+
+export function expectedLyricLanguage (metadata = {}, text = '') {
+  const declared = normalizedLanguageFamily(metadata.language)
+  if (declared) return declared
+  const identity = `${metadata.title || ''}\n${metadata.rawTitle || ''}`
+  if (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(identity)) return 'ja'
+  const profile = lyricScriptProfile(text)
+  if (profile.kana >= 2) return 'ja'
+  if (profile.han >= 8 && profile.kana === 0) return 'zh'
+  if (profile.latin >= 8 && profile.han + profile.kana === 0) return 'en'
+  return ''
+}
+
+/**
+ * Reject a translated or otherwise wrong lyric layer before it can redefine
+ * the song language. A whole Japanese vocal lyric containing substantial Han
+ * text but no kana is overwhelmingly likely to be a Chinese translation; an
+ * isolated Han-only Japanese row remains valid when the rest of the song
+ * supplies Japanese script evidence.
+ */
+export function assertOriginalLyricLayer (metadata = {}, lines = []) {
+  const text = (lines || []).map(line => line?.text || '').join('\n')
+  const profile = lyricScriptProfile(text)
+  const expected = expectedLyricLanguage(metadata, text)
+  const cjk = profile.han + profile.kana
+  if (
+    expected === 'ja' &&
+    profile.han >= 12 &&
+    profile.kana === 0
+  ) {
+    throw new Error(
+      'Japanese track matched a translated Chinese lyric layer',
+    )
+  }
+  if (
+    expected === 'zh' &&
+    profile.kana >= 4 &&
+    profile.kana / Math.max(1, cjk) >= 0.08
+  ) {
+    throw new Error('Chinese track matched a Japanese lyric layer')
+  }
+  if (
+    expected === 'en' &&
+    cjk >= 12 &&
+    profile.latin < cjk * 0.4
+  ) {
+    throw new Error('English track matched a CJK translation lyric layer')
+  }
+  return { expected, profile }
+}
 
 export function lyricLanguage (value, text = '') {
   const declared = String(value || '').toLocaleUpperCase()
@@ -107,7 +177,7 @@ export function compareOfficialPronunciation (
   }
 }
 
-export function pronunciationForLine ({
+export async function pronunciationForLine ({
   text,
   providedReading = '',
   language = '',
@@ -119,6 +189,7 @@ export function pronunciationForLine ({
       family,
       reading: provided,
       source: 'qqmusic-qrc-roma',
+      status: 'verified',
     }
   }
   if (family === 'zh' && /\p{Script=Han}/u.test(text)) {
@@ -127,6 +198,11 @@ export function pronunciationForLine ({
       reading: generateChinesePinyin(text),
       source: 'pinyin-pro',
     }
+  }
+  if (family === 'ja') {
+    const result = await japaneseReading(text, { explicitReading: providedReading })
+    if (result.reading) return { family, ...result }
+    return { family, ...result, source: result.source || 'missing' }
   }
   return {
     family,

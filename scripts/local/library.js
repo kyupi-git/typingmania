@@ -11,7 +11,18 @@ import {
   isBaselineSongPath,
   LIBRARY_BASELINE,
 } from './library-baseline.js'
-import { readPackedSongMetadata } from './packed-song-reader.js'
+import {
+  readPackedSongMetadata,
+  readPackedSongText,
+} from './packed-song-reader.js'
+import {
+  needsOriginalNameDetail,
+  ORIGINAL_ARTIST_VERSION,
+  isLikelyArtistName,
+  normalizeArtistCredits,
+} from './original-artist.js'
+import { assertOriginalLyricLayer } from './pronunciation.js'
+import { estimateAssistReferencePace } from '../../src/util/song-meta.js'
 
 export {
   canonicalSongTitle,
@@ -24,9 +35,88 @@ const EXCLUDED_DIRECTORIES = new Set([
   '.agents',
   '.codex',
   '.library-trash',
+  'assets',
+  'docs',
+  'game',
+  'import-staging',
+  'latin-table',
+  'mv-cache',
   'node_modules',
   'QQMusicCache',
+  'runtime',
+  'scripts',
+  'src',
+  'tools',
+  'upload-sessions',
+  'vendor',
 ])
+const IMPORT_SERVICES = new Set([
+  'applemusic',
+  'apple-music',
+  'local',
+  'local-files',
+  'netease',
+  'qqmusic',
+])
+
+function displayedLyricRows (lyricsCsv) {
+  return String(lyricsCsv || '')
+    .split(/\r?\n/u)
+    .filter(row => row.trim())
+    .map(row => {
+      const [, , ...parts] = row.split(',')
+      const lyric = parts.join(',')
+      const explicit = lyric.match(/^<<([\s\S]*)>>\[[\s\S]*\]$/u)
+      return { text: String(explicit?.[1] || lyric).replace(/\\([\\<>\[\]])/gu, '$1') }
+    })
+}
+
+export function sanitizeUnverifiedImportedArtists (song) {
+  if (!IMPORT_SERVICES.has(song?.source?.service)) return song
+  const resolution = song.source?.artist_resolution
+  if (
+    Number(resolution?.version || 0) >= ORIGINAL_ARTIST_VERSION &&
+    resolution?.resolved === true
+  ) return song
+  const resolutionArtists = Array.isArray(resolution?.artists)
+    ? resolution.artists.map(item => item?.raw_name || item?.rawName).filter(Boolean)
+    : []
+  const candidates = normalizeArtistCredits(
+    resolutionArtists.length
+      ? resolutionArtists
+      : (song.artistNames?.length ? song.artistNames : String(song.artist || '')),
+  ).filter(isLikelyArtistName)
+  const source = {
+    ...(song.source || {}),
+    artist_resolution: {
+      ...(resolution || {}),
+      version: Math.max(Number(resolution?.version || 0), ORIGINAL_ARTIST_VERSION),
+      status: 'pending',
+      resolved: false,
+      artists: candidates.map((name, index) => ({
+        ...(resolution?.artists?.[index] || {}),
+        raw_name: name,
+        original_name: '',
+        resolved: false,
+        source: resolution?.artists?.[index]?.source || 'pending-raw-artist',
+      })),
+    },
+    checks: { ...(song.source?.checks || {}), artist_original: false },
+  }
+  if (!candidates.length) {
+    if (!song.artist && !song.artistNames?.length) return song
+    return { ...song, artist: '', artistNames: [], rawArtistNames: [], source }
+  }
+  if (song.artist === candidates.join(' / ') &&
+      song.source?.artist_resolution?.status === 'pending') return song
+  return {
+    ...song,
+    artist: candidates.join(' / '),
+    artistNames: candidates,
+    rawArtistNames: candidates,
+    source,
+  }
+}
 
 function exactArrayBuffer (buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
@@ -249,7 +339,26 @@ export async function scanSongPackages (root) {
   const errors = []
   for (const filename of files) {
     try {
-      const song = await readPackedSongMetadata(filename)
+      let song = await readPackedSongMetadata(filename)
+      song = sanitizeUnverifiedImportedArtists(song)
+      let lyricsCsv = ''
+      if (IMPORT_SERVICES.has(song.source?.service)) {
+        lyricsCsv = await readPackedSongText(filename, 'lyrics.csv')
+        assertOriginalLyricLayer(song, displayedLyricRows(lyricsCsv))
+      }
+      if (
+        !Number.isFinite(Number(song.assist_cpm)) ||
+        !Number.isFinite(Number(song.assist_max_cpm))
+      ) {
+        lyricsCsv ||= await readPackedSongText(filename, 'lyrics.csv')
+        const assistPace = estimateAssistReferencePace(
+          lyricsCsv,
+          song.language,
+          { durationMs: Number(song.duration) * 1000 },
+        )
+        song.assist_cpm = assistPace.averageCpm
+        song.assist_max_cpm = assistPace.peakCpm
+      }
       const identity = songIdentity(song)
       const packageUrl = browserPath(root, filename)
       const artworkUrl = kind => (

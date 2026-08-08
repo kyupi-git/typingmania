@@ -100,4 +100,12 @@ test('Wikidata rejects a search hit whose medium does not match', async () => {
     media: 'movie',
     workTitle: 'Example',
   }, { fetchImpl })).resolves.toBeNull()
+  await expect(searchWikidataWork({
+    media: 'jrpg',
+    workTitle: 'Example',
+  }, { fetchImpl })).resolves.toMatchObject({
+    title: 'Example',
+    catalog: 'wikidata',
+    catalogId: 'Q99',
+  })
 })

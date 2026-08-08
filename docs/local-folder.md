@@ -27,7 +27,8 @@ chooses embedded, companion, or verified online artwork, optionally verifies
 a direct animation, film, television, documentary, commercial, variety,
 sports-event, visual-novel, JRPG, or game poster,
 removes duplicates, and writes one atomic package. Chinese pinyin is generated
-locally; Japanese Kanji requires a recording-specific timed reading.
+locally; Japanese Kanji prefers explicit ruby or a recording-specific timed
+reading, while dictionary-assisted gaps remain pending.
 
 Files without trustworthy identity, timed lyrics, complete pronunciation, or
 substantial vocal content are skipped. Missing optional artwork uses the

@@ -15,7 +15,10 @@ import {
 import {
   fetchAnimeThemesProductionVideo,
 } from './animethemes-api.js'
-import { inferNetworkRegion } from './network-source-planner.js'
+import {
+  inferNetworkRegion,
+  rankedNetworkSources,
+} from './network-source-planner.js'
 import { canonicalSongTitle } from './song-identity.js'
 
 const execFile = promisify(childProcess.execFile)
@@ -205,12 +208,26 @@ function publicSources (song, region) {
     origin,
     'official music video',
   ].filter(Boolean).join(' ')
-  const bilibili = { id: 'bilibili', url: `bilisearch5:${query}` }
-  const youtube = { id: 'youtube', url: `ytsearch5:${query}` }
-  const niconico = { id: 'niconico', url: `nicosearch5:${query}` }
-  if (region === 'cn') return [bilibili, youtube, niconico]
-  if (region === 'jp') return [youtube, niconico, bilibili]
-  return [youtube, bilibili, niconico]
+  return rankedNetworkSources([
+    {
+      id: 'bilibili',
+      url: `bilisearch5:${query}`,
+      priority: 32,
+      regionalPriority: { cn: 72, hk: 32, tw: 22, jp: 4, us: 10, global: -5 },
+    },
+    {
+      id: 'youtube',
+      url: `ytsearch5:${query}`,
+      priority: 30,
+      regionalPriority: { jp: 48, us: 52, eu: 48, global: 42, cn: -80 },
+    },
+    {
+      id: 'niconico',
+      url: `nicosearch5:${query}`,
+      priority: 22,
+      regionalPriority: { jp: 48, hk: 18, tw: 18, us: 8, global: 5, cn: -85 },
+    },
+  ], { region })
 }
 
 function productionPublicSources (song, region) {
@@ -219,21 +236,15 @@ function productionPublicSources (song, region) {
   ).trim()
   if (!origin) return []
   const query = `"${origin}" official trailer opening ending PV`
-  const bilibili = {
-    id: 'bilibili-production',
-    url: `bilisearch5:${query}`,
-  }
-  const youtube = {
-    id: 'youtube-production',
-    url: `ytsearch5:${query}`,
-  }
-  const niconico = {
-    id: 'niconico-production',
-    url: `nicosearch5:${query}`,
-  }
-  if (region === 'cn') return [bilibili, youtube, niconico]
-  if (region === 'jp') return [youtube, niconico, bilibili]
-  return [youtube, bilibili, niconico]
+  return publicSources({
+    title: origin,
+    artist: '',
+    origin: {},
+  }, region).map(source => ({
+    ...source,
+    id: `${source.id}-production`,
+    url: source.url.replace(/:[\s\S]*$/u, `:${query}`),
+  }))
 }
 
 export function plannedMusicVideoSources (song, region) {
